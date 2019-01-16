@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenShift Kuryr-Kubernetes controller
+After=syslog.target network.target
+
+[Service]
+Type=simple
+User=kuryr
+ExecStart=/usr/bin/kuryr-k8s-controller --config-file /etc/kuryr/kuryr.conf --log-file /var/log/kuryr/kuryr-controller.log
+PrivateTmp=true
+KillMode=process
+Restart=on-failure
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

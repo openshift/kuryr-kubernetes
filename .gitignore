@@ -54,6 +54,7 @@ ChangeLog
 !/.pylintrc
 !/.testr.conf
 !/.stestr.conf
+!/.oit
 
 contrib/vagrant/.vagrant
 
