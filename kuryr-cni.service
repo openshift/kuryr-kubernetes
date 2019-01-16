@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenShift Kuryr-Kubernetes CNI daemon
+After=syslog.target network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/kuryr-daemon --config-file /etc/kuryr/kuryr.conf --log-file /var/log/kuryr/kuryr-cni.log
+PrivateTmp=true
+KillMode=process
+Restart=on-failure
+TimeoutStartSec=0
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
