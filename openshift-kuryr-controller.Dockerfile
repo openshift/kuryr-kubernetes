@@ -3,7 +3,7 @@ FROM rhel7:latest
 ENV container=oci
 
 RUN yum update -y \
- && yum install -y openshift-kuryr-kubernetes-controller \
+ && yum install -y openshift-kuryr-controller \
  && yum clean all \
  && rm -rf /var/cache/yum
 
