@@ -72,7 +72,7 @@ This package contains Kuryr files common to all services.
 
 %package controller
 Summary: Kuryr Kubernetes Controller
-Requires: openshift-%{service}-common = %{version}-%{release}
+Requires: openshift-%{project}-common = %{version}-%{release}
 
 %description controller
 %{common_desc}
@@ -83,7 +83,7 @@ it obtains.
 
 %package cni
 Summary: CNI plugin
-Requires: openshift-%{service}-common = %{version}-%{release}
+Requires: openshift-%{project}-common = %{version}-%{release}
 %{?systemd_requires}
 
 %description cni
