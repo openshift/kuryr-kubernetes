@@ -8,6 +8,10 @@ Kuryr Kubernetes provides a Controller that watches the Kubernetes API for \
 Object changes and manages Neutron resources to provide the Kubernetes Cluster \
 with OpenStack networking.
 
+# %commit is intended to be set by tito builders at packaging time.
+# The value in this spec file will not be kept up to date.
+%global commit 0000000
+
 Name:      openshift-%service
 Version:   0.6.1
 Release:   1%{?dist}
