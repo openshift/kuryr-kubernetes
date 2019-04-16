@@ -252,6 +252,34 @@ def set_lbaas_spec(service, lbaas_spec):
                  resource_version=service['metadata']['resourceVersion'])
 
 
+def get_lbaas_state(endpoint):
+    try:
+        annotations = endpoint['metadata']['annotations']
+        annotation = annotations[constants.K8S_ANNOTATION_LBAAS_STATE]
+    except KeyError:
+        return None
+    obj_dict = jsonutils.loads(annotation)
+    obj = obj_lbaas.LBaaSState.obj_from_primitive(obj_dict)
+    LOG.debug("Got LBaaSState from annotation: %r", obj)
+    return obj
+
+
+def set_lbaas_state(endpoints, lbaas_state):
+    # TODO(ivc): extract annotation interactions
+    if lbaas_state is None:
+        LOG.debug("Removing LBaaSState annotation: %r", lbaas_state)
+        annotation = None
+    else:
+        lbaas_state.obj_reset_changes(recursive=True)
+        LOG.debug("Setting LBaaSState annotation: %r", lbaas_state)
+        annotation = jsonutils.dumps(lbaas_state.obj_to_primitive(),
+                                     sort_keys=True)
+    k8s = clients.get_kubernetes_client()
+    k8s.annotate(endpoints['metadata']['selfLink'],
+                 {constants.K8S_ANNOTATION_LBAAS_STATE: annotation},
+                 resource_version=endpoints['metadata']['resourceVersion'])
+
+
 def get_endpoints_link(service):
     svc_link = service['metadata']['selfLink']
     link_parts = svc_link.split('/')
@@ -263,3 +291,31 @@ def get_endpoints_link(service):
     link_parts[-2] = 'endpoints'
 
     return "/".join(link_parts)
+
+
+def has_port_changes(service, lbaas_spec):
+    link = service['metadata']['selfLink']
+
+    fields = obj_lbaas.LBaaSPortSpec.fields
+    svc_port_set = {tuple(port[attr] for attr in fields)
+                    for port in get_service_ports(service)}
+
+    spec_port_set = {tuple(getattr(port, attr)
+                     for attr in fields
+                     if port.obj_attr_is_set(attr))
+                     for port in lbaas_spec.ports}
+
+    if svc_port_set != spec_port_set:
+        LOG.debug("LBaaS spec ports %(spec_ports)s != %(svc_ports)s "
+                  "for %(link)s" % {'spec_ports': spec_port_set,
+                                    'svc_ports': svc_port_set,
+                                    'link': link})
+    return svc_port_set != spec_port_set
+
+
+def get_service_ports(service):
+    return [{'name': port.get('name'),
+             'protocol': port.get('protocol', 'TCP'),
+             'port': port['port'],
+             'targetPort': str(port['targetPort'])}
+            for port in service['spec']['ports']]

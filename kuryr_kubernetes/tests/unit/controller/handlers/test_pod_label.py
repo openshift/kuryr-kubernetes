@@ -32,7 +32,8 @@ class TestPodLabelHandler(test_base.TestCase):
         self._pod_link = mock.sentinel.pod_link
         self._pod = {
             'metadata': {'resourceVersion': self._pod_version,
-                         'selfLink': self._pod_link},
+                         'selfLink': self._pod_link,
+                         'namespace': 'default'},
             'status': {'phase': k_const.K8S_POD_STATUS_PENDING},
             'spec': {'hostNetwork': False,
                      'nodeName': 'hostname'}
@@ -57,22 +58,28 @@ class TestPodLabelHandler(test_base.TestCase):
     @mock.patch.object(drivers.VIFPoolDriver, 'get_instance')
     @mock.patch.object(drivers.PodSecurityGroupsDriver, 'get_instance')
     @mock.patch.object(drivers.PodProjectDriver, 'get_instance')
-    def test_init(self, m_get_project_driver, m_get_sg_driver,
-                  m_get_vif_pool_driver):
+    @mock.patch.object(drivers.LBaaSDriver, 'get_instance')
+    def test_init(self, m_get_lbaas_driver, m_get_project_driver,
+                  m_get_sg_driver, m_get_vif_pool_driver):
         project_driver = mock.sentinel.project_driver
         sg_driver = mock.sentinel.sg_driver
+        lbaas_driver = mock.sentinel.lbaas_driver
         vif_pool_driver = mock.Mock(spec=drivers.VIFPoolDriver)
+        m_get_lbaas_driver.return_value = lbaas_driver
         m_get_project_driver.return_value = project_driver
         m_get_sg_driver.return_value = sg_driver
         m_get_vif_pool_driver.return_value = vif_pool_driver
 
         handler = p_label.PodLabelHandler()
 
+        self.assertEqual(lbaas_driver, handler._drv_lbaas)
         self.assertEqual(project_driver, handler._drv_project)
         self.assertEqual(sg_driver, handler._drv_sg)
         self.assertEqual(vif_pool_driver, handler._drv_vif_pool)
 
-    def test_on_present(self):
+    @mock.patch('kuryr_kubernetes.controller.drivers.utils.get_services')
+    def test_on_present(self,  m_get_services):
+        m_get_services.return_value = {"items": []}
         self._has_pod_state.return_value = True
         self._get_pod_labels.return_value = {'test1': 'test'}
 

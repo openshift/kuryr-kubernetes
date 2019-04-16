@@ -168,6 +168,15 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
             sg = self.neutron.create_security_group(body=security_group_body)
             sg_id = sg['security_group']['id']
             driver_utils.tag_neutron_resources('security-groups', [sg_id])
+            # NOTE(dulek): Neutron populates every new SG with two rules
+            #              allowing egress on IPv4 and IPv6. This collides with
+            #              how network policies are supposed to work, because
+            #              initially even egress traffic should be blocked.
+            #              To work around this we will delete those two SG
+            #              rules just after creation.
+            for sgr in sg['security_group']['security_group_rules']:
+                self.neutron.delete_security_group_rule(sgr['id'])
+
             i_rules, e_rules = self.parse_network_policy_rules(policy, sg_id)
             for i_rule in i_rules:
                 sgr_id = driver_utils.create_security_group_rule(i_rule)
@@ -287,8 +296,42 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
         return allow_all, selectors, allowed_cidrs
 
     def _parse_sg_rules(self, sg_rule_body_list, direction, policy, sg_id):
+        """Parse policy into security group rules.
+
+        This method inspects the policy object and create the equivalent
+        security group rules associating them to the referenced sg_id.
+        It returns the rules by adding them to the sg_rule_body_list list,
+        for the stated direction.
+
+        It accounts for special cases, such as:
+        - PolicyTypes stating only Egress: ensuring ingress is not restricted
+        - PolicyTypes not including Egress: ensuring egress is not restricted
+        - {} ingress/egress rules: applying default open for all
+        """
         rule_list = policy['spec'].get(direction)
         if not rule_list:
+            policy_types = policy['spec'].get('policyTypes')
+            if direction == 'ingress':
+                if len(policy_types) == 1 and policy_types[0] == 'Egress':
+                    # NOTE(ltomasbo): add default rule to enable all ingress
+                    # traffic as NP policy is not affecting ingress
+                    LOG.debug('Applying default all open for ingress for '
+                              'policy %s', policy['metadata']['selfLink'])
+                    rule = driver_utils.create_security_group_rule_body(
+                        sg_id, direction)
+                    sg_rule_body_list.append(rule)
+            elif direction == 'egress':
+                if policy_types and 'Egress' not in policy_types:
+                    # NOTE(ltomasbo): add default rule to enable all egress
+                    # traffic as NP policy is not affecting egress
+                    LOG.debug('Applying default all open for egress for '
+                              'policy %s', policy['metadata']['selfLink'])
+                    rule = driver_utils.create_security_group_rule_body(
+                        sg_id, direction)
+                    sg_rule_body_list.append(rule)
+            else:
+                LOG.warning('Not supported policyType at network policy %s',
+                            policy['metadata']['selfLink'])
             return
 
         policy_namespace = policy['metadata']['namespace']
@@ -299,8 +342,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
         if rule_list[0] == {}:
             LOG.debug('Applying default all open policy from %s',
                       policy['metadata']['selfLink'])
-            rule = driver_utils.create_security_group_rule_body(
-                sg_id, direction, port_range_min=1, port_range_max=65535)
+            rule = driver_utils.create_security_group_rule_body(sg_id,
+                                                                direction)
             sg_rule_body_list.append(rule)
 
         for rule_block in rule_list:

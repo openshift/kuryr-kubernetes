@@ -196,7 +196,8 @@ class TestNetworkPolicyDriver(test_base.TestCase):
                                                              m_get_crd,
                                                              m_add_default):
         self._driver.neutron.create_security_group.return_value = {
-            'security_group': {'id': mock.sentinel.id}}
+            'security_group': {'id': mock.sentinel.id,
+                               'security_group_rules': []}}
         m_utils.get_subnet_cidr.return_value = {
             'subnet': {'cidr': mock.sentinel.cidr}}
         m_parse.return_value = (self._i_rules, self._e_rules)
@@ -221,7 +222,8 @@ class TestNetworkPolicyDriver(test_base.TestCase):
                                                       m_add_crd, m_get_crd,
                                                       m_add_default):
         self._driver.neutron.create_security_group.return_value = {
-            'security_group': {'id': mock.sentinel.id}}
+            'security_group': {'id': mock.sentinel.id,
+                               'security_group_rules': []}}
         m_utils.get_subnet_cidr.return_value = {
             'subnet': {'cidr': mock.sentinel.cidr}}
         m_parse.return_value = (self._i_rules, self._e_rules)
@@ -248,7 +250,8 @@ class TestNetworkPolicyDriver(test_base.TestCase):
                                                        m_add_crd, m_get_crd,
                                                        m_add_default):
         self._driver.neutron.create_security_group.return_value = {
-            'security_group': {'id': mock.sentinel.id}}
+            'security_group': {'id': mock.sentinel.id,
+                               'security_group_rules': []}}
         m_utils.get_subnet_cidr.return_value = {
             'subnet': {'cidr': mock.sentinel.cidr}}
         m_parse.return_value = (self._i_rules, self._e_rules)
@@ -359,10 +362,8 @@ class TestNetworkPolicyDriver(test_base.TestCase):
         policy['spec']['egress'] = [{}]
         self._driver.parse_network_policy_rules(policy, self._sg_id)
         m_get_ns_cidr.assert_not_called()
-        calls = [mock.call(self._sg_id, 'ingress', port_range_min=1,
-                           port_range_max=65535),
-                 mock.call(self._sg_id, 'egress', port_range_min=1,
-                           port_range_max=65535)]
+        calls = [mock.call(self._sg_id, 'ingress'),
+                 mock.call(self._sg_id, 'egress')]
         m_create.assert_has_calls(calls)
 
     @mock.patch.object(network_policy.NetworkPolicyDriver,

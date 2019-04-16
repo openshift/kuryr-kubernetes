@@ -236,7 +236,7 @@ def patch_kuryr_crd(crd, i_rules, e_rules, pod_selector, np_spec=None):
 
 
 def create_security_group_rule_body(
-        security_group_id, direction, port_range_min,
+        security_group_id, direction, port_range_min=None,
         port_range_max=None, protocol=None, ethertype='IPv4', cidr=None,
         description="Kuryr-Kubernetes NetPolicy SG rule", namespace=None):
     if not port_range_min:
@@ -405,3 +405,21 @@ def get_services(namespace):
                       'namespace %s', namespace)
         raise
     return services
+
+
+def service_matches_affected_pods(service, pod_selectors):
+    """Returns if the service is affected by the pod selectors
+
+    Checks if the service selector matches the labelSelectors of
+    NetworkPolicies.
+
+    param service: k8s service
+    param pod_selectors: a list of kubernetes labelSelectors
+    return: True if the service is selected by any of the labelSelectors
+            and False otherwise.
+    """
+    svc_selector = service['spec'].get('selector')
+    for selector in pod_selectors:
+        if match_selector(selector, svc_selector):
+            return True
+    return False
