@@ -12,14 +12,14 @@ with OpenStack networking.
 # The value in this spec file will not be kept up to date.
 %global commit 0000000
 
-Name:      openshift-%service
-Version:   0.6.1
+Name:      openshift-%project
+Version:   4.1.0
 Release:   1%{?dist}
 Summary:   OpenStack networking integration with OpenShift and Kubernetes
 License:   ASL 2.0
 URL:       http://docs.openstack.org/developer/kuryr-kubernetes/
 
-Source0:   %{service}-%{upstream_version}.tar.gz
+Source0:   %{service}.tar.gz
 Source1:   kuryr.logrotate
 Source2:   kuryr-controller.service
 Source3:   openshift-kuryr.tmpfs
