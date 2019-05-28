@@ -305,7 +305,7 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                 matched_pods[container_port].update(pod_info)
             else:
                 matched_pods[container_port] = pod_info
-        if not allow_all and matched_pods:
+        if not allow_all and matched_pods and cidr:
             for container_port, pods in matched_pods.items():
                 sg_rule = driver_utils.create_security_group_rule_body(
                     sg_id, direction, container_port,
@@ -373,6 +373,11 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                                        direction, port, sg_rule_body_list):
         for resource in allowed_resources:
             cidr, ns = self._get_resource_details(resource)
+            # NOTE(maysams): Skipping resource that do not have
+            # an IP assigned. The security group rule creation
+            # will be triggered again after the resource is running.
+            if not cidr:
+                continue
             sg_rule = (
                 driver_utils.create_security_group_rule_body(
                     sg_id, direction, port.get('port'),
@@ -397,6 +402,16 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     protocol=port.get('protocol')))
             sg_rule_body_list.append(sg_rule)
 
+    def _create_default_sg_rule(self, sg_id, direction, sg_rule_body_list):
+        default_rule = {
+            u'security_group_rule': {
+                u'ethertype': 'IPv4',
+                u'security_group_id': sg_id,
+                u'direction': direction,
+                u'description': 'Kuryr-Kubernetes NetPolicy SG rule',
+            }}
+        sg_rule_body_list.append(default_rule)
+
     def _parse_sg_rules(self, sg_rule_body_list, direction, policy, sg_id):
         """Parse policy into security group rules.
 
@@ -419,18 +434,16 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     # traffic as NP policy is not affecting ingress
                     LOG.debug('Applying default all open for ingress for '
                               'policy %s', policy['metadata']['selfLink'])
-                    rule = driver_utils.create_security_group_rule_body(
-                        sg_id, direction)
-                    sg_rule_body_list.append(rule)
+                    self._create_default_sg_rule(
+                        sg_id, direction, sg_rule_body_list)
             elif direction == 'egress':
                 if policy_types and 'Egress' not in policy_types:
                     # NOTE(ltomasbo): add default rule to enable all egress
                     # traffic as NP policy is not affecting egress
                     LOG.debug('Applying default all open for egress for '
                               'policy %s', policy['metadata']['selfLink'])
-                    rule = driver_utils.create_security_group_rule_body(
-                        sg_id, direction)
-                    sg_rule_body_list.append(rule)
+                    self._create_default_sg_rule(
+                        sg_id, direction, sg_rule_body_list)
             else:
                 LOG.warning('Not supported policyType at network policy %s',
                             policy['metadata']['selfLink'])
@@ -497,6 +510,11 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
             elif allowed_resources or allow_all or selectors:
                 for resource in allowed_resources:
                     cidr, namespace = self._get_resource_details(resource)
+                    # NOTE(maysams): Skipping resource that do not have
+                    # an IP assigned. The security group rule creation
+                    # will be triggered again after the resource is running.
+                    if not cidr:
+                        continue
                     rule = driver_utils.create_security_group_rule_body(
                         sg_id, direction,
                         port_range_min=1,
