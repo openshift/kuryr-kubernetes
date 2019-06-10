@@ -44,7 +44,7 @@ LOG = logging.getLogger(__name__)
 # Moved out from neutron_default group
 vif_pool_driver_opts = [
     oslo_cfg.IntOpt('ports_pool_max',
-                    help=_("Set a maximun amount of ports per pool. "
+                    help=_("Set a maximum amount of ports per pool. "
                            "0 to disable"),
                     default=0),
     oslo_cfg.IntOpt('ports_pool_min',
@@ -54,7 +54,7 @@ vif_pool_driver_opts = [
                     help=_("Number of ports to be created in a bulk request"),
                     default=10),
     oslo_cfg.IntOpt('ports_pool_update_frequency',
-                    help=_("Minimun interval (in seconds) "
+                    help=_("Minimum interval (in seconds) "
                            "between pool updates"),
                     default=20),
     oslo_cfg.DictOpt('pools_vif_drivers',
@@ -446,8 +446,8 @@ class NeutronVIFPool(BaseVIFPool):
         name to available_port if the port_debug option is enabled.
         Then the port_id is included in the dict with the available_ports.
 
-        If a maximun number of port per pool is set, the port will be
-        deleted if the maximun has been already reached.
+        If a maximum number of ports per pool is set, the port will be
+        deleted if the maximum has been already reached.
         """
         while True:
             eventlet.sleep(oslo_cfg.CONF.vif_pool.ports_pool_update_frequency)
@@ -667,8 +667,8 @@ class NestedVIFPool(BaseVIFPool):
         name to available_port if the port_debug option is enabled.
         Then the port_id is included in the dict with the available_ports.
 
-        If a maximun number of ports per pool is set, the port will be
-        deleted if the maximun has been already reached.
+        If a maximum number of ports per pool is set, the port will be
+        deleted if the maximum has been already reached.
         """
         while True:
             eventlet.sleep(oslo_cfg.CONF.vif_pool.ports_pool_update_frequency)
@@ -828,14 +828,28 @@ class NestedVIFPool(BaseVIFPool):
                             LOG.debug('Port %s is not in the available ports '
                                       'pool.', kuryr_subport['id'])
 
+    @lockutils.synchronized('return_to_pool_nested')
+    def populate_pool(self, trunk_ip, project_id, subnets, security_groups,
+                      num_ports=None):
+        if not hasattr(self, '_available_ports_pools'):
+            LOG.info("Kuryr-controller not yet ready to populate pools.")
+            raise exceptions.ResourceNotReady(trunk_ip)
+        pool_key = self._get_pool_key(trunk_ip, project_id, None, subnets)
+        pools = self._available_ports_pools.get(pool_key)
+        if not pools:
+            self.force_populate_pool(trunk_ip, project_id, subnets,
+                                     security_groups, num_ports)
+
     def force_populate_pool(self, trunk_ip, project_id, subnets,
-                            security_groups, num_ports):
+                            security_groups, num_ports=None):
         """Create a given amount of subports at a given trunk port.
 
         This function creates a given amount of subports and attaches them to
         the specified trunk, adding them to the related subports pool
         regardless of the amount of subports already available in the pool.
         """
+        if not num_ports:
+            num_ports = oslo_cfg.CONF.vif_pool.ports_pool_batch
         vifs = self._drv_vif.request_vifs(
             pod=[],
             project_id=project_id,
@@ -998,3 +1012,8 @@ class MultiVIFPool(base.VIFPoolDriver):
                 vif_pool_mapping[pod_driver] = pool_driver
 
         return vif_pool_mapping
+
+    def populate_pool(self, node_ip, project_id, subnets, sg_id):
+        for vif_drv in self._vif_drvs.values():
+            if str(vif_drv) == 'NestedVIFPool':
+                vif_drv.populate_pool(node_ip, project_id, subnets, sg_id)
