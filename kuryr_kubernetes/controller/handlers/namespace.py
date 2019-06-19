@@ -47,7 +47,7 @@ cache.configure_cache_region(oslo_cfg.CONF, namespace_handler_cache_region)
 
 class NamespaceHandler(k8s_base.ResourceEventHandler):
     OBJECT_KIND = constants.K8S_OBJ_NAMESPACE
-    OBJECT_WATCH_PATH = "%s/%s" % (constants.K8S_API_BASE, "namespaces")
+    OBJECT_WATCH_PATH = constants.K8S_API_NAMESPACES
 
     def __init__(self):
         super(NamespaceHandler, self).__init__()
@@ -115,7 +115,15 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
         net_crd = self._get_net_crd(net_crd_id)
 
         self._drv_vif_pool.delete_network_pools(net_crd['spec']['netId'])
-        self._drv_subnets.delete_namespace_subnet(net_crd)
+        try:
+            self._drv_subnets.delete_namespace_subnet(net_crd)
+        except exceptions.ResourceNotReady:
+            LOG.debug("Subnet is not ready to be removed.")
+            # TODO(ltomasbo): Once KuryrPort CRDs is supported, we should
+            # execute a delete network ports method here to remove the ports
+            # associated to the namespace/subnet, ensuring next retry will be
+            # successful
+            raise
         sg_id = net_crd['spec'].get('sgId')
         if sg_id:
             self._drv_sg.delete_sg(sg_id)

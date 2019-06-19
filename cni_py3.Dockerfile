@@ -1,4 +1,10 @@
-FROM fedora:29
+FROM golang:1.11 AS builder
+
+WORKDIR /go/src/opendev.com/kuryr-kubernetes
+COPY . .
+RUN go build -o /go/bin/kuryr-cni ./kuryr_cni
+
+FROM fedora:30
 LABEL authors="Antoni Segura Puimedon<toni@kuryr.org>, Michał Dulko<mdulko@redhat.com>"
 
 ARG UPPER_CONSTRAINTS_FILE="https://opendev.org/openstack/requirements/raw/branch/master/upper-constraints.txt"
@@ -18,6 +24,8 @@ RUN python3.6 -m ensurepip \
     && dnf -y history undo last \
     && rm -rf /opt/kuryr-kubernetes \
     && mkdir ${OSLO_LOCK_PATH}
+
+COPY --from=builder /go/bin/kuryr-cni /kuryr-cni
 
 ARG CNI_DAEMON=True
 ENV CNI_DAEMON ${CNI_DAEMON}
