@@ -1,3 +1,9 @@
+FROM openshift/origin-release:golang-1.11 AS builder
+
+WORKDIR /go/src/github.com/openshift/kuryr-kubernetes
+COPY . .
+RUN go build -o /go/bin/kuryr-cni ./kuryr_cni
+
 FROM rhel7:latest
 
 ENV container=oci
@@ -15,6 +21,8 @@ name=OpenStack Stein Repository\n\
 baseurl=http://mirror.centos.org/centos/7/cloud/$basearch/openstack-stein/\n\
 gpgcheck=0\n\
 enabled=1\n' >> /etc/yum.repos.d/rdo-stein.repo
+
+COPY --from=builder /go/bin/kuryr-cni /kuryr-cni
 
 RUN yum update -y \
  && yum install -y openshift-kuryr-cni iproute bridge-utils openvswitch \
