@@ -1,7 +1,15 @@
+FROM openshift/origin-release:golang-1.11 AS builder
+
+WORKDIR /go/src/github.com/openshift/kuryr-kubernetes
+COPY . .
+RUN go build -o /go/bin/kuryr-cni ./kuryr_cni
+
 FROM rhel7:latest
 
 ENV container=oci
 ARG OSLO_LOCK_PATH=/var/kuryr-lock
+
+COPY --from=builder /go/bin/kuryr-cni /kuryr-cni
 
 RUN yum update -y \
  && yum install -y openshift-kuryr-cni iproute bridge-utils openvswitch \
@@ -19,5 +27,5 @@ LABEL \
         maintainer="Michal Dulko <mdulko@redhat.com>" \
         name="openshift/kuryr-cni" \
         io.k8s.display-name="kuryr-cni" \
-        version="4.0.0" \
+        version="4.2.0" \
         com.redhat.component="kuryr-cni-container"
