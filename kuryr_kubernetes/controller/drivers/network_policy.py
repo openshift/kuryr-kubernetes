@@ -114,8 +114,9 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                         e_rule["security_group_rule"]["id"] = sgr_id
         # Annotate kuryrnetpolicy CRD with current policy and ruleset
         pod_selector = policy['spec'].get('podSelector')
-        driver_utils.patch_kuryr_crd(crd, i_rules, e_rules, pod_selector,
-                                     np_spec=policy['spec'])
+        driver_utils.patch_kuryrnetworkpolicy_crd(crd, i_rules, e_rules,
+                                                  pod_selector,
+                                                  np_spec=policy['spec'])
 
         if existing_pod_selector != pod_selector:
             return existing_pod_selector
@@ -651,13 +652,13 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                 constants.K8S_API_CRD_NAMESPACES,
                 netpolicy_crd_namespace,
                 netpolicy_crd_name))
+        except exceptions.K8sResourceNotFound:
+            LOG.debug("KuryrNetPolicy CRD Object not found: %s",
+                      netpolicy_crd_name)
         except exceptions.K8sClientException:
             LOG.exception("Kubernetes Client Exception deleting kuryrnetpolicy"
                           " CRD.")
             raise
-        except n_exc.NotFound:
-            LOG.debug("KuryrNetPolicy CRD Object not found: %s",
-                      netpolicy_crd_name)
 
     def affected_pods(self, policy, selector=None):
         if selector or selector == {}:
