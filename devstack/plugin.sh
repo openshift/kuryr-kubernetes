@@ -150,7 +150,7 @@ function generate_containerized_kuryr_resources {
 
     # Generate kuryr resources in k8s formats.
     local output_dir="${DATA_DIR}/kuryr-kubernetes"
-    generate_kuryr_configmap $output_dir $KURYR_CONFIG $KURYR_CONFIG
+    generate_kuryr_configmap $output_dir $KURYR_CONFIG
     generate_kuryr_certificates_secret $output_dir $SSL_BUNDLE_FILE
     generate_kuryr_service_account $output_dir
     generate_controller_deployment $output_dir $KURYR_HEALTH_SERVER_PORT $KURYR_CONTROLLER_HA
@@ -455,6 +455,12 @@ function configure_neutron_defaults {
          openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
              quota set --secgroups 100 --secgroup-rules 100 "$project_id"
     fi
+
+    # NOTE(dulek): DevStack's admin default for SG's and instances is 10, this
+    #              is too little for our tests with Octavia configured to use
+    #              amphora.
+    openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
+        quota set --secgroups 100 --secgroup-rules 100 --instances 100 admin
 
     if [ -n "$OVS_BRIDGE" ]; then
         iniset "$KURYR_CONFIG" neutron_defaults ovs_bridge "$OVS_BRIDGE"
