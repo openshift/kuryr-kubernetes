@@ -15,9 +15,7 @@ cp kuryr-controller.service ${source_path}
 cp openshift-kuryr.tmpfs ${source_path}
 cp kuryr-cni.service ${source_path}
 
-# FIXME(dulek): For some reason python2-pbr is not available in CI ecosystem.
-#               I'm injecting it from the repo, but need to fix this.
-yum install -y python2-pbr-3.1.1-3.el7ar.noarch.rpm python-devel
+yum install -y python2-pbr python-devel
 
 rpmbuild -ba -D "_topdir `pwd`/_output" openshift-kuryr-kubernetes.spec
 createrepo _output/RPMS/noarch
