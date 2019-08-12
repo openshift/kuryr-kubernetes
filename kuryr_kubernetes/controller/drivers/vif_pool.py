@@ -261,11 +261,6 @@ class BaseVIFPool(base.VIFPoolDriver):
     def _recover_precreated_ports(self):
         raise NotImplementedError()
 
-    def _get_ports_by_attrs(self, **attrs):
-        neutron = clients.get_neutron_client()
-        ports = neutron.list_ports(**attrs)
-        return ports['ports']
-
     def _get_in_use_ports(self):
         kubernetes = clients.get_kubernetes_client()
         in_use_ports = []
@@ -314,6 +309,7 @@ class BaseVIFPool(base.VIFPoolDriver):
         # NOTE(ltomasbo): Ensure previously created ports are recovered into
         # their respective pools
         self._recover_precreated_ports()
+        self._cleanup_leftover_ports()
 
     def _get_trunks_info(self):
         """Returns information about trunks and their subports.
@@ -348,7 +344,11 @@ class BaseVIFPool(base.VIFPoolDriver):
         subports = {}
         subnets = {}
 
-        all_active_ports = self._get_ports_by_attrs(status='ACTIVE')
+        attrs = {'status': 'ACTIVE'}
+        tags = config.CONF.neutron_defaults.resource_tags
+        if tags:
+            attrs['tags'] = tags
+        all_active_ports = c_utils.get_ports_by_attrs(**attrs)
         in_use_ports = self._get_in_use_ports()
 
         for port in all_active_ports:
@@ -374,6 +374,45 @@ class BaseVIFPool(base.VIFPoolDriver):
                                               utils.get_subnet(
                                                   subnet_id)}
         return parent_ports, subports, subnets
+
+    def _cleanup_leftover_ports(self):
+        neutron = clients.get_neutron_client()
+        attrs = {'device_owner': kl_const.DEVICE_OWNER, 'status': 'DOWN'}
+        existing_ports = c_utils.get_ports_by_attrs(**attrs)
+
+        tags = config.CONF.neutron_defaults.resource_tags
+        if tags:
+            nets = neutron.list_networks(tags=tags)['networks']
+            nets_ids = [n['id'] for n in nets]
+            for port in existing_ports:
+                net_id = port['network_id']
+                if net_id in nets_ids:
+                    if port.get('binding:host_id'):
+                        for tag in tags:
+                            if tag not in port.get('tags', []):
+                                # delete the port if it has binding details, it
+                                # belongs to the deployment subnet and it does
+                                # not have the right tags
+                                try:
+                                    neutron.delete_port(port['id'])
+                                    break
+                                except n_exc.NeutronClientException:
+                                    LOG.debug("Problem deleting leftover port "
+                                              "%s. Skipping.", port['id'])
+                                    continue
+                    else:
+                        # delete port if they have no binding but belong to the
+                        # deployment networks, regardless of their tagging
+                        try:
+                            neutron.delete_port(port['id'])
+                        except n_exc.NeutronClientException:
+                            LOG.debug("Problem deleting leftover port %s. "
+                                      "Skipping.", port['id'])
+                            continue
+        else:
+            for port in existing_ports:
+                if not port.get('binding:host_id'):
+                    neutron.delete_port(port['id'])
 
 
 class NeutronVIFPool(BaseVIFPool):
@@ -462,8 +501,11 @@ class NeutronVIFPool(BaseVIFPool):
         neutron = clients.get_neutron_client()
         sg_current = {}
         if not config.CONF.kubernetes.port_debug:
-            kuryr_ports = self._get_ports_by_attrs(
-                device_owner=kl_const.DEVICE_OWNER)
+            attrs = {'device_owner': kl_const.DEVICE_OWNER}
+            tags = config.CONF.neutron_defaults.resource_tags
+            if tags:
+                attrs['tags'] = tags
+            kuryr_ports = c_utils.get_ports_by_attrs(**attrs)
             for port in kuryr_ports:
                 if port['id'] in self._recyclable_ports:
                     sg_current[port['id']] = tuple(sorted(
@@ -509,13 +551,16 @@ class NeutronVIFPool(BaseVIFPool):
                 LOG.debug('Port already recycled: %s', port_id)
 
     def _recover_precreated_ports(self):
+        attrs = {'device_owner': kl_const.DEVICE_OWNER}
+        tags = config.CONF.neutron_defaults.resource_tags
+        if tags:
+            attrs['tags'] = tags
+
         if config.CONF.kubernetes.port_debug:
-            available_ports = self._get_ports_by_attrs(
-                name=constants.KURYR_PORT_NAME, device_owner=[
-                    kl_const.DEVICE_OWNER])
+            attrs['name'] = constants.KURYR_PORT_NAME
+            available_ports = c_utils.get_ports_by_attrs(**attrs)
         else:
-            kuryr_ports = self._get_ports_by_attrs(
-                device_owner=kl_const.DEVICE_OWNER)
+            kuryr_ports = c_utils.get_ports_by_attrs(**attrs)
             in_use_ports = self._get_in_use_ports()
             available_ports = [port for port in kuryr_ports
                                if port['id'] not in in_use_ports]
@@ -683,8 +728,11 @@ class NestedVIFPool(BaseVIFPool):
         neutron = clients.get_neutron_client()
         sg_current = {}
         if not config.CONF.kubernetes.port_debug:
-            kuryr_subports = self._get_ports_by_attrs(
-                device_owner=['trunk:subport', kl_const.DEVICE_OWNER])
+            attrs = {'device_owner': ['trunk:subport', kl_const.DEVICE_OWNER]}
+            tags = config.CONF.neutron_defaults.resource_tags
+            if tags:
+                attrs['tags'] = tags
+            kuryr_subports = c_utils.get_ports_by_attrs(**attrs)
             for subport in kuryr_subports:
                 if subport['id'] in self._recyclable_ports:
                     sg_current[subport['id']] = tuple(sorted(
