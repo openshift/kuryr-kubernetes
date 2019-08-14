@@ -164,6 +164,7 @@ exit 0
 %license LICENSE
 %{_bindir}/kuryr-k8s-controller
 %{_bindir}/kuryr-k8s-status
+%{_bindir}/kuryr-dns-webhook
 %{_unitdir}/kuryr-controller.service
 
 %files -n python2-%{service}
