@@ -13,7 +13,7 @@ with OpenStack networking.
 %global commit 0000000
 
 Name:      openshift-%project
-Version:   4.2.0
+Version:   4.2.1
 Release:   1%{?dist}
 Summary:   OpenStack networking integration with OpenShift and Kubernetes
 License:   ASL 2.0
