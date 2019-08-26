@@ -6,7 +6,8 @@ RUN yum update -y \
  && yum install -y python-devel python-pbr python-pip \
  && yum clean all \
  && rm -rf /var/cache/yum \
- && pip install tox
+ && pip install "more-itertools<6.0.0" tox
+# more-itertools 6.0.0 drops support for Python 2.7, so we need to ensure we have older version.
 
 LABEL \
         io.k8s.description="This is a component of OpenShift Container Platform and provides a testing container for Kuryr service." \
