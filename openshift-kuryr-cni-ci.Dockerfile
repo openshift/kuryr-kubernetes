@@ -11,7 +11,7 @@ ARG OSLO_LOCK_PATH=/var/kuryr-lock
 
 # FIXME(dulek): For some reason the local repos are disabled by default and
 #               yum-config-manager is unable to enable them. Using sed for now.
-RUN sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/*
+RUN sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/built.repo
 
 # FIXME(dulek): Until I'll figure out how to get OpenStack repos here, we need this hack.
 RUN yum install --setopt=tsflags=nodocs -y \
