@@ -79,7 +79,8 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                 drivers.ServiceSecurityGroupsDriver.get_instance())
 
     def on_present(self, pod):
-        if driver_utils.is_host_network(pod) or not self._is_pending_node(pod):
+        if (driver_utils.is_host_network(pod) or
+                not self._is_pod_scheduled(pod)):
             # REVISIT(ivc): consider an additional configurable check that
             # would allow skipping pods to enable heterogeneous environments
             # where certain pods/namespaces/nodes can be managed by other
@@ -156,11 +157,24 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                                 services, crd_pod_selectors, project_id)
 
     def on_deleted(self, pod):
-        if driver_utils.is_host_network(pod):
+        if (driver_utils.is_host_network(pod) or
+                not pod['spec'].get('nodeName')):
             return
 
         project_id = self._drv_project.get_project(pod)
-        crd_pod_selectors = self._drv_sg.delete_sg_rules(pod)
+        try:
+            crd_pod_selectors = self._drv_sg.delete_sg_rules(pod)
+        except k_exc.ResourceNotReady:
+            # NOTE(ltomasbo): If the pod is being deleted before
+            # kuryr-controller annotated any information about the port
+            # associated, there is no need for deleting sg rules associated to
+            # it. So this exception could be safetly ignored for the current
+            # sg drivers. Only the NP driver associates rules to the pods ips,
+            # and that waits for annotations to start.
+            LOG.debug("Pod was not yet annotated by Kuryr-controller. "
+                      "Skipping SG rules deletion associated to the pod %s",
+                      pod)
+            crd_pod_selectors = []
         try:
             security_groups = self._drv_sg.get_security_groups(pod, project_id)
         except k_exc.ResourceNotReady:
@@ -178,7 +192,7 @@ class VIFHandler(k8s_base.ResourceEventHandler):
             for ifname, vif in state.vifs.items():
                 self._drv_vif_pool.release_vif(pod, vif, project_id,
                                                security_groups)
-        if (self._is_network_policy_enabled() and
+        if (self._is_network_policy_enabled() and crd_pod_selectors and
                 oslo_cfg.CONF.octavia_defaults.enforce_sg_rules):
             services = driver_utils.get_services()
             self._update_services(services, crd_pod_selectors, project_id)
@@ -193,8 +207,8 @@ class VIFHandler(k8s_base.ResourceEventHandler):
         return True
 
     @staticmethod
-    def _is_pending_node(pod):
-        """Checks if Pod is in PENDGING status and has node assigned."""
+    def _is_pod_scheduled(pod):
+        """Checks if Pod is in PENDING status and has node assigned."""
         try:
             return (pod['spec']['nodeName'] and
                     pod['status']['phase'] == constants.K8S_POD_STATUS_PENDING)
