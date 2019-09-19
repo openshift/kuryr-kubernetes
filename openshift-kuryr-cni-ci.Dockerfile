@@ -24,8 +24,7 @@ enabled=1\n' >> /etc/yum.repos.d/rdo-stein.repo
 
 COPY --from=builder /go/bin/kuryr-cni /kuryr-cni
 
-RUN yum update -y \
- && yum install -y openshift-kuryr-cni iproute bridge-utils openvswitch \
+RUN yum install -y openshift-kuryr-cni iproute bridge-utils openvswitch \
  && yum clean all \
  && rm -rf /var/cache/yum
 
