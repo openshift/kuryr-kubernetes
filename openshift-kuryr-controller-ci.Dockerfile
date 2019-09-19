@@ -15,8 +15,7 @@ baseurl=http://mirror.centos.org/centos/7/cloud/$basearch/openstack-stein/\n\
 gpgcheck=0\n\
 enabled=1\n' >> /etc/yum.repos.d/rdo-stein.repo
 
-RUN yum update -y \
- && yum install -y openshift-kuryr-controller \
+RUN yum install -y openshift-kuryr-controller \
  && yum clean all \
  && rm -rf /var/cache/yum
 
