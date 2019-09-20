@@ -65,7 +65,14 @@ class LBaaSv2Driver(base.LBaaSDriver):
         self._octavia_tags = False
         # Check if Octavia API supports tagging.
         lbaas = clients.get_loadbalancer_client()
-        v = lbaas.get_api_major_version()
+        try:
+            v = lbaas.get_api_major_version()
+        except IndexError:
+            # There's a bug in keystoneauth1 3.10.0 that raises this if Octavia
+            # is old, let's just assume we don't know in that case. For details
+            # see commit c40eb2951d5cf24589ea357a11aa252978636020 there.
+            v = None
+
         if v >= _OCTAVIA_TAGGING_VERSION:
             LOG.info('Octavia supports resource tags.')
             self._octavia_tags = True
