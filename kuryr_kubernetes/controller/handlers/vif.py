@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutronclient.common import exceptions as n_exc
 from oslo_cache import core as cache
 from oslo_config import cfg as oslo_cfg
 from oslo_log import log as logging
@@ -91,8 +92,16 @@ class VIFHandler(k8s_base.ResourceEventHandler):
         project_id = self._drv_project.get_project(pod)
         security_groups = self._drv_sg.get_security_groups(pod, project_id)
         if not state:
-            subnets = self._drv_subnets.get_subnets(pod, project_id)
-
+            try:
+                subnets = self._drv_subnets.get_subnets(pod, project_id)
+            except n_exc.NotFound:
+                LOG.warning("Subnet does not exists. If namespace driver is "
+                            "used, probably the namespace for the pod is "
+                            "already deleted. So this pod does not need to "
+                            "get a port as it will be deleted too. If the "
+                            "default subnet driver is used, then you must "
+                            "select an existing subnet to be used by Kuryr.")
+                return
             # Request the default interface of pod
             main_vif = self._drv_vif_pool.request_vif(
                 pod, project_id, subnets, security_groups)
@@ -134,8 +143,12 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                     if vif.plugin == constants.KURYR_VIF_TYPE_SRIOV:
                         driver_utils.update_port_pci_info(pod, vif)
                     if not vif.active:
-                        self._drv_vif_pool.activate_vif(pod, vif)
-                        changed = True
+                        try:
+                            self._drv_vif_pool.activate_vif(pod, vif)
+                            changed = True
+                        except n_exc.PortNotFoundClient:
+                            LOG.debug("Port not found, possibly already "
+                                      "deleted. No need to activate it")
             finally:
                 if changed:
                     try:
