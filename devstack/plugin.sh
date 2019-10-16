@@ -848,7 +848,7 @@ EOF
     cat >> "${output_dir}/coredns.yml" << EOF
     }
 ---
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: coredns
@@ -1004,6 +1004,9 @@ function update_tempest_conf_file {
     fi
     if [[ "$KURYR_SG_DRIVER" == "namespace" ]] && [[ "$KURYR_SUBNET_DRIVER" == "namespace" ]]; then
         iniset $TEMPEST_CONFIG kuryr_kubernetes namespace_enabled True
+    fi
+    if [[ "$KURYR_SUBNET_DRIVER" == "namespace" ]]; then
+        iniset $TEMPEST_CONFIG kuryr_kubernetes subnet_per_namespace True
     fi
     if [[ "$KURYR_K8S_SERIAL_TESTS" == "True" ]]; then
         iniset $TEMPEST_CONFIG kuryr_kubernetes run_tests_serial True
@@ -1165,6 +1168,7 @@ if [[ "$1" == "stack" && "$2" == "extra" ]]; then
     if is_service_enabled kuryr-kubernetes; then
         /usr/local/bin/kubectl apply -f ${KURYR_HOME}/kubernetes_crds/kuryrnet.yaml
         /usr/local/bin/kubectl apply -f ${KURYR_HOME}/kubernetes_crds/kuryrnetpolicy.yaml
+        /usr/local/bin/kubectl apply -f ${KURYR_HOME}/kubernetes_crds/kuryrloadbalancer.yaml
         if [ "$KURYR_K8S_CONTAINERIZED_DEPLOYMENT" == "True" ]; then
             generate_containerized_kuryr_resources
         fi
