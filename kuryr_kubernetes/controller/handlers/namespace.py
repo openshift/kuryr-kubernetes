@@ -120,8 +120,9 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
             net_crd = self._add_kuryrnet_crd(ns_name, net_crd_spec)
             self._set_net_crd(namespace, net_crd)
             self._drv_sg.create_namespace_sg_rules(namespace)
-        except exceptions.K8sClientException:
-            LOG.exception("Kubernetes client exception. Rolling back "
+        except (exceptions.K8sClientException,
+                exceptions.K8sResourceNotFound):
+            LOG.exception("Kuryrnet CRD creation failed. Rolling back "
                           "resources created for the namespace.")
             self._drv_subnets.rollback_network_resources(net_crd_spec, ns_name)
             if net_crd_sg.get('sgId'):
@@ -137,6 +138,14 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
                             namespace)
                 return
             net_crd = self._get_net_crd(net_crd_id)
+            if not net_crd:
+                LOG.warning("This should not happen. Probably this is event "
+                            "is processed twice due to a restart or etcd is "
+                            "not in sync")
+                # NOTE(ltomasbo): We should rely on etcd properly behaving, so
+                # we are returning here to prevent duplicated events processing
+                # but not to prevent etcd failures.
+                return
 
         net_crd_name = 'ns-' + namespace['metadata']['name']
 
