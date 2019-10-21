@@ -87,7 +87,7 @@ class NetworkPolicyHandler(k8s_base.ResourceEventHandler):
             for service in services.get('items'):
                 # TODO(ltomasbo): Skip other services that are not affected
                 # by the policy
-                if (service['metadata']['name'] == 'kubernetes' or not
+                if (not service['spec'].get('selector') or not
                         self._is_service_affected(service, pods_to_update)):
                     continue
                 sgs = self._drv_svc_sg.get_security_groups(service,
@@ -127,7 +127,7 @@ class NetworkPolicyHandler(k8s_base.ResourceEventHandler):
                 services = driver_utils.get_services(
                     policy['metadata']['namespace'])
                 for svc in services.get('items'):
-                    if (svc['metadata']['name'] == 'kubernetes' or not
+                    if (not svc['spec'].get('selector') or not
                             self._is_service_affected(svc, pods_to_update)):
                         continue
                     sgs = self._drv_svc_sg.get_security_groups(svc,
