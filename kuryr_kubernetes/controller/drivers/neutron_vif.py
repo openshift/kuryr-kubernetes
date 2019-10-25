@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from keystoneauth1 import exceptions as key_exc
 from kuryr.lib import constants as kl_const
 from neutronclient.common import exceptions as n_exc
 from oslo_log import log as logging
@@ -87,7 +88,11 @@ class NeutronPodVIFDriver(base.PodVIFDriver):
             return
 
         neutron = clients.get_neutron_client()
-        port = neutron.show_port(vif.id).get('port')
+        try:
+            port = neutron.show_port(vif.id).get('port')
+        except (key_exc.ConnectionError, n_exc.ConnectionFailed):
+            LOG.debug("Unable to obtain port information, retrying.")
+            raise k_exc.ResourceNotReady(vif)
 
         if port['status'] != kl_const.PORT_STATUS_ACTIVE:
             raise k_exc.ResourceNotReady(vif)
