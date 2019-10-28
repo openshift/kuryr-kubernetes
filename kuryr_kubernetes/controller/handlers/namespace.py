@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import eventlet
+import time
+
 from oslo_cache import core as cache
 from oslo_config import cfg as oslo_cfg
 from oslo_log import log as logging
@@ -20,7 +23,7 @@ from oslo_serialization import jsonutils
 from kuryr_kubernetes import clients
 from kuryr_kubernetes import constants
 from kuryr_kubernetes.controller.drivers import base as drivers
-from kuryr_kubernetes.controller.drivers import utils as drivers_utils
+from kuryr_kubernetes.controller.drivers import utils as driver_utils
 from kuryr_kubernetes import exceptions
 from kuryr_kubernetes.handlers import k8s_base
 from kuryr_kubernetes import utils
@@ -57,20 +60,32 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
         self._drv_vif_pool = drivers.VIFPoolDriver.get_instance(
             specific_driver='multi_pool')
         self._drv_vif_pool.set_vif_driver()
+        if self._is_network_policy_enabled():
+            self._drv_lbaas = drivers.LBaaSDriver.get_instance()
+            self._drv_svc_sg = (
+                drivers.ServiceSecurityGroupsDriver.get_instance())
+
+        # NOTE(ltomasbo): Checks and clean up leftovers due to
+        # kuryr-controller retarts
+        eventlet.spawn(self._cleanup_namespace_leftovers)
 
     def on_present(self, namespace):
         ns_name = namespace['metadata']['name']
         current_namespace_labels = namespace['metadata'].get('labels')
-        previous_namespace_labels = drivers_utils.get_annotated_labels(
+        previous_namespace_labels = driver_utils.get_annotated_labels(
             namespace, constants.K8S_ANNOTATION_NAMESPACE_LABEL)
         LOG.debug("Got previous namespace labels from annotation: %r",
                   previous_namespace_labels)
 
-        if current_namespace_labels != previous_namespace_labels:
-            self._drv_sg.update_namespace_sg_rules(namespace)
-            self._set_namespace_labels(namespace, current_namespace_labels)
-
         project_id = self._drv_project.get_project(namespace)
+        if current_namespace_labels != previous_namespace_labels:
+            crd_selectors = self._drv_sg.update_namespace_sg_rules(namespace)
+            self._set_namespace_labels(namespace, current_namespace_labels)
+            if (self._is_network_policy_enabled() and crd_selectors and
+                    oslo_cfg.CONF.octavia_defaults.enforce_sg_rules):
+                services = driver_utils.get_services()
+                self._update_services(services, crd_selectors, project_id)
+
         net_crd_id = self._get_net_crd_id(namespace)
         if net_crd_id:
             LOG.debug("CRD existing at the new namespace")
@@ -112,12 +127,13 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
             net_crd = self._add_kuryrnet_crd(ns_name, net_crd_spec)
             self._set_net_crd(namespace, net_crd)
             self._drv_sg.create_namespace_sg_rules(namespace)
-            self._set_namespace_labels(namespace, current_namespace_labels)
-        except exceptions.K8sClientException:
-            LOG.exception("Kubernetes client exception. Rolling back "
+        except (exceptions.K8sClientException,
+                exceptions.K8sResourceNotFound):
+            LOG.exception("Kuryrnet CRD creation failed. Rolling back "
                           "resources created for the namespace.")
             self._drv_subnets.rollback_network_resources(net_crd_spec, ns_name)
-            self._drv_sg.delete_sg(net_crd_sg['sgId'])
+            if net_crd_sg.get('sgId'):
+                self._drv_sg.delete_sg(net_crd_sg['sgId'])
             self._del_kuryrnet_crd(net_crd_name)
 
     def on_deleted(self, namespace, net_crd=None):
@@ -129,8 +145,16 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
                             namespace)
                 return
             net_crd = self._get_net_crd(net_crd_id)
+            if not net_crd:
+                LOG.warning("This should not happen. Probably this is event "
+                            "is processed twice due to a restart or etcd is "
+                            "not in sync")
+                # NOTE(ltomasbo): We should rely on etcd properly behaving, so
+                # we are returning here to prevent duplicated events processing
+                # but not to prevent etcd failures.
+                return
 
-        net_crd_name = 'ns-' + namespace['metadata']['name']
+        net_crd_name = net_crd['metadata']['name']
 
         self._drv_vif_pool.delete_network_pools(net_crd['spec']['netId'])
         try:
@@ -149,7 +173,13 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
             LOG.debug("There is no security group associated with the "
                       "namespace to be deleted")
         self._del_kuryrnet_crd(net_crd_name)
-        self._drv_sg.delete_namespace_sg_rules(namespace)
+        crd_selectors = self._drv_sg.delete_namespace_sg_rules(namespace)
+
+        if (self._is_network_policy_enabled() and crd_selectors and
+                oslo_cfg.CONF.octavia_defaults.enforce_sg_rules):
+            project_id = self._drv_project.get_project(namespace)
+            services = driver_utils.get_services()
+            self._update_services(services, crd_selectors, project_id)
 
     def is_ready(self, quota):
         if not utils.has_kuryr_crd(constants.K8S_API_CRD_KURYRNETS):
@@ -253,3 +283,57 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
         k8s.annotate(namespace['metadata']['selfLink'],
                      {constants.K8S_ANNOTATION_NAMESPACE_LABEL: annotation},
                      resource_version=namespace['metadata']['resourceVersion'])
+
+    def _update_services(self, services, crd_selectors, project_id):
+        for service in services.get('items'):
+            if not driver_utils.service_matches_affected_pods(
+                    service, crd_selectors):
+                continue
+            sgs = self._drv_svc_sg.get_security_groups(service,
+                                                       project_id)
+            self._drv_lbaas.update_lbaas_sg(service, sgs)
+
+    def _is_network_policy_enabled(self):
+        enabled_handlers = oslo_cfg.CONF.kubernetes.enabled_handlers
+        svc_sg_driver = oslo_cfg.CONF.kubernetes.service_security_groups_driver
+        return ('policy' in enabled_handlers and svc_sg_driver == 'policy')
+
+    def _cleanup_namespace_leftovers(self):
+        k8s = clients.get_kubernetes_client()
+        while True:
+            retry = False
+            try:
+                net_crds = k8s.get(constants.K8S_API_CRD_KURYRNETS)
+                namespaces = k8s.get(constants.K8S_API_NAMESPACES)
+            except exceptions.K8sClientException:
+                LOG.warning("Error retriving namespace information")
+                return
+            ns_dict = {'ns-' + ns['metadata']['name']: ns
+                       for ns in namespaces.get('items')}
+
+            for net_crd in net_crds.get('items'):
+                try:
+                    ns_dict[net_crd['metadata']['name']]
+                except KeyError:
+                    # Note(ltomasbo): The CRD does not have an associated
+                    # namespace. It must be deleted
+                    LOG.debug("Removing namespace leftovers associated to: "
+                              "%s", net_crd)
+                    # removing the 'ns-' preceding the namespace name on the
+                    # net CRDs
+                    ns_name = net_crd['metadata']['name'][3:]
+                    # only namespace name is needed for on_deleted, faking the
+                    # nonexistent object
+                    ns_to_delete = {'metadata': {'name': ns_name}}
+                    try:
+                        self.on_deleted(ns_to_delete, net_crd)
+                    except exceptions.ResourceNotReady:
+                        LOG.debug("Cleanup of namespace %s failed. A retry "
+                                  "will be triggered.", ns_name)
+                        retry = True
+                        continue
+            if not retry:
+                break
+
+            # Leave time between retries to help Neutron to complete actions
+            time.sleep(60)

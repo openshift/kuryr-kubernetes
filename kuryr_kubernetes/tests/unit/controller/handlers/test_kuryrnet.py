@@ -32,6 +32,7 @@ class TestKuryrNetHandler(test_base.TestCase):
         self._subnets = mock.sentinel.subnets
         self._kuryrnet_crd = {
             'metadata': {
+                'name': 'test-namespace',
                 'annotations': {
                     'namespaceName': 'test-namespace'
                 }},
@@ -77,10 +78,15 @@ class TestKuryrNetHandler(test_base.TestCase):
         self.assertEqual(subnet_driver, handler._drv_subnets)
         self.assertEqual(vif_pool_driver, handler._drv_vif_pool)
 
+    @mock.patch.object(driver_utils, 'get_annotations')
+    @mock.patch.object(driver_utils, 'get_namespace')
     @mock.patch.object(driver_utils, 'patch_kuryrnet_crd')
     @mock.patch.object(utils, 'get_nodes_ips')
-    def test_on_added(self, m_get_nodes_ips, m_patch_kn_crd):
+    def test_on_added(self, m_get_nodes_ips, m_patch_kn_crd, m_get_ns,
+                      m_get_ann):
         m_get_nodes_ips.return_value = ['node-ip']
+        m_get_ns.return_value = mock.sentinel.ns
+        m_get_ann.return_value = self._kuryrnet_crd['metadata']['name']
 
         kuryrnet.KuryrNetHandler.on_added(self._handler, self._kuryrnet_crd)
 
@@ -93,3 +99,15 @@ class TestKuryrNetHandler(test_base.TestCase):
                                                     self._subnets,
                                                     [])
         m_patch_kn_crd.assert_called_once()
+
+    @mock.patch.object(driver_utils, 'get_annotations')
+    @mock.patch.object(driver_utils, 'get_namespace')
+    def test_on_added_no_namespace(self, m_get_ns, m_get_ann):
+        m_get_ns.return_value = None
+        ns_name = self._kuryrnet_crd['metadata']['annotations'].get(
+            'namespaceName')
+
+        kuryrnet.KuryrNetHandler.on_added(self._handler, self._kuryrnet_crd)
+
+        m_get_ns.assert_called_once_with(ns_name)
+        m_get_ann.assert_not_called()

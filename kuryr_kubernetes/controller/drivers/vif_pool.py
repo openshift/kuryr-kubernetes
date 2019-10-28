@@ -16,6 +16,7 @@
 import abc
 import collections
 import eventlet
+import os
 import six
 import time
 
@@ -121,6 +122,9 @@ class NoopVIFPool(base.VIFPoolDriver):
     def update_vif_sgs(self, pod, sgs):
         self._drv_vif.update_vif_sgs(pod, sgs)
 
+    def remove_sg_from_pools(self, sg_id, net_id):
+        pass
+
     def sync_pools(self):
         pass
 
@@ -191,8 +195,8 @@ class BaseVIFPool(base.VIFPoolDriver):
         try:
             host_addr = self._get_host_addr(pod)
         except KeyError:
-            LOG.warning("Pod has not been scheduled yet.")
-            raise
+            return None
+
         pool_key = self._get_pool_key(host_addr, project_id, None, subnets)
 
         try:
@@ -240,9 +244,13 @@ class BaseVIFPool(base.VIFPoolDriver):
                 self._available_ports_pools.setdefault(
                     pool_key, {}).setdefault(
                         security_groups, []).append(vif.id)
+            if not vifs:
+                self._last_update[pool_key] = {security_groups: last_update}
 
-    def release_vif(self, pod, vif, project_id, security_groups):
-        host_addr = self._get_host_addr(pod)
+    def release_vif(self, pod, vif, project_id, security_groups,
+                    host_addr=None):
+        if not host_addr:
+            host_addr = self._get_host_addr(pod)
 
         pool_key = self._get_pool_key(host_addr, project_id, vif.network.id,
                                       None)
@@ -287,6 +295,33 @@ class BaseVIFPool(base.VIFPoolDriver):
     def delete_network_pools(self, net_id):
         raise NotImplementedError()
 
+    def remove_sg_from_pools(self, sg_id, net_id):
+        neutron = clients.get_neutron_client()
+        for pool_key, pool_ports in self._available_ports_pools.items():
+            if self._get_pool_key_net(pool_key) != net_id:
+                continue
+            for sg_key, ports in pool_ports.items():
+                if sg_id not in sg_key:
+                    continue
+                # remove the pool associated to that SG
+                del self._available_ports_pools[pool_key][sg_key]
+                for port_id in ports:
+                    # remove all SGs from the port to be reused
+                    neutron.update_port(
+                        port_id,
+                        {
+                            "port": {
+                                'security_groups': []
+                            }
+                        })
+                    # add the port to the default pool
+                    self._available_ports_pools[pool_key].setdefault(
+                        tuple([]), []).append(port_id)
+                # NOTE(ltomasbo): as this ports were not created for this
+                # pool, ensuring they are used first, marking them as the
+                # most outdated
+                self._last_update[pool_key] = {tuple([]): 0}
+
     def _create_healthcheck_file(self):
         # Note(ltomasbo): Create a health check file when the pre-created
         # ports are loaded into their corresponding pools. This file is used
@@ -302,14 +337,21 @@ class BaseVIFPool(base.VIFPoolDriver):
     @lockutils.synchronized('return_to_pool_baremetal')
     @lockutils.synchronized('return_to_pool_nested')
     def sync_pools(self):
+        # NOTE(ltomasbo): Ensure readiness probe is not set to true until the
+        # pools sync is completed in case of controller restart
+        try:
+            os.remove('/tmp/pools_loaded')
+        except OSError:
+            pass
+
         self._available_ports_pools = collections.defaultdict()
         self._existing_vifs = collections.defaultdict()
         self._recyclable_ports = collections.defaultdict()
         self._last_update = collections.defaultdict()
         # NOTE(ltomasbo): Ensure previously created ports are recovered into
         # their respective pools
-        self._recover_precreated_ports()
         self._cleanup_leftover_ports()
+        self._recover_precreated_ports()
 
     def _get_trunks_info(self):
         """Returns information about trunks and their subports.
@@ -648,6 +690,41 @@ class NestedVIFPool(BaseVIFPool):
 
     def set_vif_driver(self, driver):
         self._drv_vif = driver
+
+    def _get_parent_port_id(self, vif):
+        neutron = clients.get_neutron_client()
+        args = {}
+        if config.CONF.neutron_defaults.resource_tags:
+            args['tags'] = config.CONF.neutron_defaults.resource_tags
+        trunks = neutron.list_trunks(**args)
+        for trunk in trunks['trunks']:
+            for sp in trunk['sub_ports']:
+                if sp['port_id'] == vif.id:
+                    return trunk['port_id']
+
+        return None
+
+    def release_vif(self, pod, vif, project_id, security_groups):
+        try:
+            host_addr = self._get_host_addr(pod)
+        except KeyError:
+            name = pod['metadata']['name']
+            LOG.warning("Pod %s does not have status.hostIP field set when "
+                        "getting deleted. This is unusual. Trying to "
+                        "determine the IP by calling Neutron.",
+                        name)
+
+            parent_id = self._get_parent_port_id(vif)
+            if not parent_id:
+                LOG.warning("Port %s not found, ignoring its release request.",
+                            vif.id)
+                return
+
+            host_addr = self._get_parent_port_ip(parent_id)
+            LOG.debug("Determined hostIP for pod %s is %s", name, host_addr)
+
+        super(NestedVIFPool, self).release_vif(
+            pod, vif, project_id, security_groups, host_addr=host_addr)
 
     def _get_port_from_pool(self, pool_key, pod, subnets, security_groups):
         try:
@@ -990,8 +1067,8 @@ class MultiVIFPool(base.VIFPoolDriver):
         for pod_driver, pool_driver in vif_pool_mapping.items():
             if not utils.check_suitable_multi_pool_driver_opt(pool_driver,
                                                               pod_driver):
-                LOG.error("The pool and pod driver selected are not "
-                          "compatible. They will be skipped")
+                LOG.error("The pool(%s) and pod(%s) driver selected are not "
+                          "compatible.", pool_driver, pod_driver)
                 raise exceptions.MultiPodDriverPoolConfigurationNotSupported()
             drv_vif = base.PodVIFDriver.get_instance(
                 specific_driver=pod_driver)
@@ -1016,6 +1093,12 @@ class MultiVIFPool(base.VIFPoolDriver):
     def update_vif_sgs(self, pod, sgs):
         pod_vif_type = self._get_pod_vif_type(pod)
         self._vif_drvs[pod_vif_type].update_vif_sgs(pod, sgs)
+
+    def remove_sg_from_pools(self, sg_id, net_id):
+        for vif_drv in self._vif_drvs.values():
+            if str(vif_drv) == 'NoopVIFPool':
+                continue
+            vif_drv.remove_sg_from_pools(sg_id, net_id)
 
     def delete_network_pools(self, net_id):
         for vif_drv in self._vif_drvs.values():

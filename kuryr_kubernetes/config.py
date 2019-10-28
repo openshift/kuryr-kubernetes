@@ -12,6 +12,7 @@
 import os
 import sys
 
+from keystoneauth1 import loading as ks_loading
 from kuryr.lib._i18n import _
 from kuryr.lib import config as lib_config
 from oslo_config import cfg
@@ -155,6 +156,18 @@ k8s_opts = [
     cfg.IntOpt('watch_retry_timeout',
                help=_('Time (in seconds) the watcher retries watching for.'),
                default=60),
+    cfg.IntOpt('watch_connection_timeout',
+               help=_('TCP connection timeout (in seconds) for the watcher '
+                      'connections to K8s API.'),
+               default=30),
+    cfg.IntOpt('watch_read_timeout',
+               help=_('TCP read timeout (in seconds) for the watcher '
+                      'connections to K8s API. This affects reaction to time '
+                      'when there are no events being streamed from K8s API. '
+                      'When too low, Kuryr will reconnect more often. When '
+                      'too high, Kuryr will take longer to reconnect when K8s '
+                      'API stream was being silently broken.'),
+               default=60),
     cfg.ListOpt('enabled_handlers',
                 help=_("The comma-separated handlers that should be "
                        "registered for watching in the pipeline."),
@@ -255,6 +268,9 @@ nested_vif_driver_opts = [
 DEFAULT_PHYSNET_SUBNET_MAPPINGS = {}
 DEFAULT_DEVICE_MAPPINGS = []
 sriov_opts = [
+    cfg.StrOpt('kubelet_root_dir',
+               help=_("The root directory of the Kubelet daemon"),
+               default='/var/lib/kubelet'),
     cfg.DictOpt('default_physnet_subnets',
                 help=_("A mapping of default subnets for certain physnets "
                        "in a form of physnet-name:<SUBNET-ID>"),
@@ -280,6 +296,40 @@ sriov_opts = [
                default=constants.K8S_SRIOV_PREFIX),
 ]
 
+# Those are taken from kuryr-lib.
+neutron_group = cfg.OptGroup(
+    'neutron',
+    title='Neutron Options',
+    help=_('Configuration options for OpenStack Neutron'))
+
+neutron_opts = [
+    cfg.StrOpt('enable_dhcp',
+               default='True',
+               help=_('Enable or Disable dhcp for neutron subnets.')),
+    cfg.StrOpt('default_subnetpool_v4',
+               default='kuryr',
+               help=_('Name of default subnetpool version 4')),
+    cfg.StrOpt('default_subnetpool_v6',
+               default='kuryr6',
+               help=_('Name of default subnetpool version 6')),
+    cfg.BoolOpt('vif_plugging_is_fatal',
+                default=False,
+                help=_("Whether a plugging operation is failed if the port "
+                       "to plug does not become active")),
+    cfg.IntOpt('vif_plugging_timeout',
+               default=0,
+               help=_("Seconds to wait for port to become active")),
+    cfg.StrOpt('region_name',
+               default=None,
+               help=_('Region name of the neturon endpoint to use.')),
+    cfg.StrOpt('endpoint_type',
+               default='public',
+               choices=['public', 'admin', 'internal'],
+               help=_('Type of the neutron endpoint to use. This endpoint '
+                      'will be looked up in the keystone catalog and should '
+                      'be one of public, internal or admin.')),
+]
+
 
 CONF = cfg.CONF
 CONF.register_opts(kuryr_k8s_opts)
@@ -294,7 +344,12 @@ CONF.register_opts(sriov_opts, group='sriov')
 
 CONF.register_opts(lib_config.core_opts)
 CONF.register_opts(lib_config.binding_opts, 'binding')
-lib_config.register_neutron_opts(CONF)
+
+# Taken from kuryr-lib
+CONF.register_group(neutron_group)
+CONF.register_opts(neutron_opts, group=neutron_group)
+ks_loading.register_session_conf_options(CONF, neutron_group.name)
+ks_loading.register_auth_conf_options(CONF, neutron_group.name)
 
 logging.register_options(CONF)
 

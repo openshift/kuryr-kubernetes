@@ -80,10 +80,9 @@ class DaemonServer(object):
         try:
             vif = self.plugin.add(params)
             data = jsonutils.dumps(vif.obj_to_primitive())
-        except exceptions.ResourceNotReady as e:
+        except exceptions.ResourceNotReady:
             self._check_failure()
-            LOG.error("Timed out waiting for requested pod to appear in "
-                      "registry: %s.", e)
+            LOG.error('Error when processing addNetwork request')
             return '', httplib.GATEWAY_TIMEOUT, self.headers
         except Exception:
             self._check_failure()
@@ -102,16 +101,17 @@ class DaemonServer(object):
 
         try:
             self.plugin.delete(params)
-        except exceptions.ResourceNotReady as e:
+        except exceptions.ResourceNotReady:
             # NOTE(dulek): It's better to ignore this error - most of the time
             #              it will happen when pod is long gone and kubelet
             #              overzealously tries to delete it from the network.
             #              We cannot really do anything without VIF annotation,
             #              so let's just tell kubelet to move along.
-            LOG.warning("Timed out waiting for requested pod to appear in "
-                        "registry: %s. Ignoring.", e)
+            LOG.warning('Error when processing delNetwork request. '
+                        'Ignoring this error, pod is most likely gone')
             return '', httplib.NO_CONTENT, self.headers
         except Exception:
+            self._check_failure()
             LOG.exception('Error when processing delNetwork request. CNI '
                           'Params: %s.', params)
             return '', httplib.INTERNAL_SERVER_ERROR, self.headers
@@ -140,7 +140,8 @@ class DaemonServer(object):
                 self.failure_count.value += 1
             else:
                 with self.healthy.get_lock():
-                    LOG.debug("Reporting maximun CNI ADD failures reached.")
+                    LOG.debug("Reporting maximum CNI ADD/DEL failures "
+                              "reached.")
                     self.healthy.value = False
 
 
@@ -191,7 +192,7 @@ class CNIDaemonWatcherService(cotyledon.Service):
         self.pipeline = h_cni.CNIPipeline()
         self.pipeline.register(h_cni.CallbackHandler(self.on_done,
                                                      self.on_deleted))
-        self.watcher = k_watcher.Watcher(self.pipeline, exit_on_stop=True)
+        self.watcher = k_watcher.Watcher(self.pipeline)
         self.watcher.add(
             "%(base)s/pods?fieldSelector=spec.nodeName=%(node_name)s" % {
                 'base': k_const.K8S_API_BASE,

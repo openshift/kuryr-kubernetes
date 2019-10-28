@@ -179,7 +179,6 @@ class TestK8sClient(test_base.TestCase):
             'annotations': annotations,
             'resourceVersion': new_resource_version}}
         conflicting_data = jsonutils.dumps(conflicting_obj, sort_keys=True)
-        good_data = jsonutils.dumps(good_obj, sort_keys=True)
 
         m_resp_conflict = mock.MagicMock()
         m_resp_conflict.ok = False
@@ -197,10 +196,6 @@ class TestK8sClient(test_base.TestCase):
         m_patch.assert_has_calls([
             mock.call(self.base_url + path,
                       data=conflicting_data,
-                      headers=mock.ANY,
-                      cert=(None, None), verify=False),
-            mock.call(self.base_url + path,
-                      data=good_data,
                       headers=mock.ANY,
                       cert=(None, None), verify=False)])
 
@@ -262,23 +257,35 @@ class TestK8sClient(test_base.TestCase):
         actual_obj = {'metadata': {
             'annotations': {'a1': 'v2'},
             'resourceVersion': new_resource_version}}
+        good_obj = {'metadata': {
+            'annotations': annotations,
+            'resourceVersion': new_resource_version}}
         conflicting_data = jsonutils.dumps(conflicting_obj, sort_keys=True)
+        good_data = jsonutils.dumps(good_obj, sort_keys=True)
 
         m_resp_conflict = mock.MagicMock()
         m_resp_conflict.ok = False
         m_resp_conflict.status_code = requests.codes.conflict
         m_patch.return_value = m_resp_conflict
+        m_resp_good = mock.MagicMock()
+        m_resp_good.ok = True
+        m_resp_good.json.return_value = conflicting_obj
+        m_patch.side_effect = [m_resp_conflict, m_resp_good]
 
         with mock.patch.object(self.client, 'get') as m_get:
             m_get.return_value = actual_obj
-            self.assertRaises(exc.K8sClientException,
-                              self.client.annotate,
-                              path, annotations,
-                              resource_version=resource_version)
-        m_patch.assert_called_once_with(self.base_url + path,
-                                        data=conflicting_data,
-                                        headers=mock.ANY,
-                                        cert=(None, None), verify=False)
+            self.assertEqual(annotations, self.client.annotate(
+                path, annotations,
+                resource_version=resource_version))
+        m_patch.assert_has_calls([
+            mock.call(self.base_url + path,
+                      data=conflicting_data,
+                      headers=mock.ANY,
+                      cert=(None, None), verify=False),
+            mock.call(self.base_url + path,
+                      data=good_data,
+                      headers=mock.ANY,
+                      cert=(None, None), verify=False)])
 
     @mock.patch('itertools.count')
     @mock.patch('requests.patch')
@@ -328,7 +335,34 @@ class TestK8sClient(test_base.TestCase):
         self.assertEqual(cycles, m_resp.close.call_count)
         m_get.assert_called_with(self.base_url + path, headers={}, stream=True,
                                  params={'watch': 'true'}, cert=(None, None),
-                                 verify=False)
+                                 verify=False, timeout=(30, 60))
+
+    @mock.patch('requests.get')
+    def test_watch_restart(self, m_get):
+        path = '/test'
+        data = [{'object': {'metadata': {'name': 'obj%s' % i,
+                                         'resourceVersion': i}}}
+                for i in range(3)]
+        lines = [jsonutils.dump_as_bytes(i) for i in data]
+
+        m_resp = mock.MagicMock()
+        m_resp.ok = True
+        m_resp.iter_lines.side_effect = [lines, requests.ReadTimeout, lines]
+        m_get.return_value = m_resp
+
+        self.assertEqual(data * 2,
+                         list(itertools.islice(self.client.watch(path),
+                                               len(data) * 2)))
+        self.assertEqual(3, m_get.call_count)
+        self.assertEqual(3, m_resp.close.call_count)
+        m_get.assert_any_call(
+            self.base_url + path, headers={}, stream=True,
+            params={"watch": "true"}, cert=(None, None), verify=False,
+            timeout=(30, 60))
+        m_get.assert_any_call(
+            self.base_url + path, headers={}, stream=True,
+            params={"watch": "true", "resourceVersion": 2}, cert=(None, None),
+            verify=False, timeout=(30, 60))
 
     @mock.patch('requests.get')
     def test_watch_exception(self, m_get):

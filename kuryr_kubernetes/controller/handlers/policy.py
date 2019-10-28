@@ -20,6 +20,7 @@ from kuryr_kubernetes import clients
 from kuryr_kubernetes import constants as k_const
 from kuryr_kubernetes.controller.drivers import base as drivers
 from kuryr_kubernetes.controller.drivers import utils as driver_utils
+from kuryr_kubernetes import exceptions
 from kuryr_kubernetes.handlers import k8s_base
 from kuryr_kubernetes import utils
 
@@ -86,7 +87,7 @@ class NetworkPolicyHandler(k8s_base.ResourceEventHandler):
             for service in services.get('items'):
                 # TODO(ltomasbo): Skip other services that are not affected
                 # by the policy
-                if (service['metadata']['name'] == 'kubernetes' or not
+                if (not service['spec'].get('selector') or not
                         self._is_service_affected(service, pods_to_update)):
                     continue
                 sgs = self._drv_svc_sg.get_security_groups(service,
@@ -116,13 +117,17 @@ class NetworkPolicyHandler(k8s_base.ResourceEventHandler):
                             oslo_cfg.OptGroup('neutron_defaults'))
                 self._drv_vif_pool.update_vif_sgs(pod, pod_sgs)
 
+            # ensure ports at the pool don't have the NP sg associated
+            net_id = self._get_policy_net_id(policy)
+            self._drv_vif_pool.remove_sg_from_pools(crd_sg, net_id)
+
             self._drv_policy.release_network_policy(netpolicy_crd)
 
             if oslo_cfg.CONF.octavia_defaults.enforce_sg_rules:
                 services = driver_utils.get_services(
                     policy['metadata']['namespace'])
                 for svc in services.get('items'):
-                    if (svc['metadata']['name'] == 'kubernetes' or not
+                    if (not svc['spec'].get('selector') or not
                             self._is_service_affected(svc, pods_to_update)):
                         continue
                     sgs = self._drv_svc_sg.get_security_groups(svc,
@@ -149,3 +154,16 @@ class NetworkPolicyHandler(k8s_base.ResourceEventHandler):
         svc_pods = driver_utils.get_pods({'selector': svc_selector},
                                          svc_namespace).get('items')
         return any(pod in svc_pods for pod in affected_pods)
+
+    def _get_policy_net_id(self, policy):
+        policy_ns = policy['metadata']['namespace']
+        kuryrnet_name = 'ns-' + str(policy_ns)
+
+        kubernetes = clients.get_kubernetes_client()
+        try:
+            net_crd = kubernetes.get('{}/{}'.format(
+                k_const.K8S_API_CRD_KURYRNETS, kuryrnet_name))
+        except exceptions.K8sClientException:
+            LOG.exception("Kubernetes Client Exception.")
+            raise
+        return net_crd['spec']['netId']

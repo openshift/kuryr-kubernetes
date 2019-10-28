@@ -221,6 +221,7 @@ function create_k8s_api_service {
     local lb_name
     local use_octavia
     local project_id
+    local fixed_ips
 
     project_id=$(get_or_create_project \
         "$KURYR_NEUTRON_DEFAULT_PROJECT" default)
@@ -230,7 +231,8 @@ function create_k8s_api_service {
                              subnet show "$KURYR_NEUTRON_DEFAULT_SERVICE_SUBNET" \
                              -c cidr -f value)
 
-    kubelet_iface_ip=$(openstack port show kubelet-"${HOSTNAME}" -c fixed_ips -f value | cut -d \' -f 2)
+    fixed_ips=$(openstack port show kubelet-"${HOSTNAME}" -c fixed_ips -f value)
+    kubelet_iface_ip=$(python -c "print ${fixed_ips}[0]['ip_address']")
 
     k8s_api_clusterip=$(_cidr_range "$service_cidr" | cut -f1)
 
@@ -928,7 +930,7 @@ function create_ingress_l7_router {
     local lb_uuid
 
     lb_name=${KURYR_L7_ROUTER_NAME}
-    max_timeout=600
+    max_timeout=1000
     project_id=$(get_or_create_project \
         "$KURYR_NEUTRON_DEFAULT_PROJECT" default)
 

@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutronclient.common import exceptions as n_exc
 from oslo_cache import core as cache
 from oslo_config import cfg as oslo_cfg
 from oslo_log import log as logging
@@ -73,11 +74,14 @@ class VIFHandler(k8s_base.ResourceEventHandler):
             specific_driver='multi_pool')
         self._drv_vif_pool.set_vif_driver()
         self._drv_multi_vif = drivers.MultiVIFDriver.get_enabled_drivers()
-        self._drv_lbaas = drivers.LBaaSDriver.get_instance()
-        self._drv_svc_sg = drivers.ServiceSecurityGroupsDriver.get_instance()
+        if self._is_network_policy_enabled():
+            self._drv_lbaas = drivers.LBaaSDriver.get_instance()
+            self._drv_svc_sg = (
+                drivers.ServiceSecurityGroupsDriver.get_instance())
 
     def on_present(self, pod):
-        if driver_utils.is_host_network(pod) or not self._is_pending_node(pod):
+        if (driver_utils.is_host_network(pod) or
+                not self._is_pod_scheduled(pod)):
             # REVISIT(ivc): consider an additional configurable check that
             # would allow skipping pods to enable heterogeneous environments
             # where certain pods/namespaces/nodes can be managed by other
@@ -86,13 +90,27 @@ class VIFHandler(k8s_base.ResourceEventHandler):
         state = driver_utils.get_pod_state(pod)
         LOG.debug("Got VIFs from annotation: %r", state)
         project_id = self._drv_project.get_project(pod)
+        security_groups = self._drv_sg.get_security_groups(pod, project_id)
         if not state:
-            security_groups = self._drv_sg.get_security_groups(pod, project_id)
-            subnets = self._drv_subnets.get_subnets(pod, project_id)
-
+            try:
+                subnets = self._drv_subnets.get_subnets(pod, project_id)
+            except (n_exc.NotFound, k_exc.K8sResourceNotFound):
+                LOG.warning("Subnet does not exists. If namespace driver is "
+                            "used, probably the namespace for the pod is "
+                            "already deleted. So this pod does not need to "
+                            "get a port as it will be deleted too. If the "
+                            "default subnet driver is used, then you must "
+                            "select an existing subnet to be used by Kuryr.")
+                return
             # Request the default interface of pod
             main_vif = self._drv_vif_pool.request_vif(
                 pod, project_id, subnets, security_groups)
+
+            if not main_vif:
+                pod_name = pod['metadata']['name']
+                LOG.warning("Ignoring event due to pod %s not being "
+                            "scheduled yet.", pod_name)
+                return
 
             state = objects.vif.PodState(default_vif=main_vif)
 
@@ -125,11 +143,25 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                     if vif.plugin == constants.KURYR_VIF_TYPE_SRIOV:
                         driver_utils.update_port_pci_info(pod, vif)
                     if not vif.active:
-                        self._drv_vif_pool.activate_vif(pod, vif)
-                        changed = True
+                        try:
+                            self._drv_vif_pool.activate_vif(pod, vif)
+                            changed = True
+                        except n_exc.PortNotFoundClient:
+                            LOG.debug("Port not found, possibly already "
+                                      "deleted. No need to activate it")
             finally:
                 if changed:
-                    self._set_pod_state(pod, state)
+                    try:
+                        self._set_pod_state(pod, state)
+                    except k_exc.K8sResourceNotFound as ex:
+                        LOG.exception("Failed to set annotation: %s", ex)
+                        for ifname, vif in state.vifs.items():
+                            self._drv_vif_pool.release_vif(
+                                pod, vif, project_id,
+                                security_groups)
+                    except k_exc.K8sClientException:
+                        pod_name = pod['metadata']['name']
+                        raise k_exc.ResourceNotReady(pod_name)
                     if self._is_network_policy_enabled():
                         crd_pod_selectors = self._drv_sg.create_sg_rules(pod)
                         if oslo_cfg.CONF.octavia_defaults.enforce_sg_rules:
@@ -138,11 +170,24 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                                 services, crd_pod_selectors, project_id)
 
     def on_deleted(self, pod):
-        if driver_utils.is_host_network(pod):
+        if (driver_utils.is_host_network(pod) or
+                not pod['spec'].get('nodeName')):
             return
 
         project_id = self._drv_project.get_project(pod)
-        crd_pod_selectors = self._drv_sg.delete_sg_rules(pod)
+        try:
+            crd_pod_selectors = self._drv_sg.delete_sg_rules(pod)
+        except k_exc.ResourceNotReady:
+            # NOTE(ltomasbo): If the pod is being deleted before
+            # kuryr-controller annotated any information about the port
+            # associated, there is no need for deleting sg rules associated to
+            # it. So this exception could be safetly ignored for the current
+            # sg drivers. Only the NP driver associates rules to the pods ips,
+            # and that waits for annotations to start.
+            LOG.debug("Pod was not yet annotated by Kuryr-controller. "
+                      "Skipping SG rules deletion associated to the pod %s",
+                      pod)
+            crd_pod_selectors = []
         try:
             security_groups = self._drv_sg.get_security_groups(pod, project_id)
         except k_exc.ResourceNotReady:
@@ -160,7 +205,7 @@ class VIFHandler(k8s_base.ResourceEventHandler):
             for ifname, vif in state.vifs.items():
                 self._drv_vif_pool.release_vif(pod, vif, project_id,
                                                security_groups)
-        if (self._is_network_policy_enabled() and
+        if (self._is_network_policy_enabled() and crd_pod_selectors and
                 oslo_cfg.CONF.octavia_defaults.enforce_sg_rules):
             services = driver_utils.get_services()
             self._update_services(services, crd_pod_selectors, project_id)
@@ -175,8 +220,8 @@ class VIFHandler(k8s_base.ResourceEventHandler):
         return True
 
     @staticmethod
-    def _is_pending_node(pod):
-        """Checks if Pod is in PENDGING status and has node assigned."""
+    def _is_pod_scheduled(pod):
+        """Checks if Pod is in PENDING status and has node assigned."""
         try:
             return (pod['spec']['nodeName'] and
                     pod['status']['phase'] == constants.K8S_POD_STATUS_PENDING)
@@ -186,12 +231,16 @@ class VIFHandler(k8s_base.ResourceEventHandler):
     def _set_pod_state(self, pod, state):
         # TODO(ivc): extract annotation interactions
         if not state:
-            LOG.debug("Removing VIFs annotation: %r", state)
+            LOG.debug("Removing VIFs annotation: %r for pod %s/%s (uid: %s)",
+                      state, pod['metadata']['namespace'],
+                      pod['metadata']['name'], pod['metadata']['uid'])
             annotation = None
         else:
             state_dict = state.obj_to_primitive()
             annotation = jsonutils.dumps(state_dict, sort_keys=True)
-            LOG.debug("Setting VIFs annotation: %r", annotation)
+            LOG.debug("Setting VIFs annotation: %r for pod %s/%s (uid: %s)",
+                      annotation, pod['metadata']['namespace'],
+                      pod['metadata']['name'], pod['metadata']['uid'])
 
         labels = pod['metadata'].get('labels')
         if not labels:
@@ -215,9 +264,8 @@ class VIFHandler(k8s_base.ResourceEventHandler):
 
     def _update_services(self, services, crd_pod_selectors, project_id):
         for service in services.get('items'):
-            if (service['metadata']['name'] == 'kubernetes' or not
-                    driver_utils.service_matches_affected_pods(
-                        service, crd_pod_selectors)):
+            if not driver_utils.service_matches_affected_pods(
+                    service, crd_pod_selectors):
                 continue
             sgs = self._drv_svc_sg.get_security_groups(service,
                                                        project_id)

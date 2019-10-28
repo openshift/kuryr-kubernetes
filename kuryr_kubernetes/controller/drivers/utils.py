@@ -284,9 +284,11 @@ def create_security_group_rule_body(
 
 @MEMOIZE
 def get_pod_ip(pod):
-    vif = pod['metadata']['annotations'].get('openstack.org/kuryr-vif')
-    if vif is None:
-        return vif
+    try:
+        pod_metadata = pod['metadata']['annotations']
+        vif = pod_metadata[constants.K8S_ANNOTATION_VIF]
+    except KeyError:
+        return None
     vif = jsonutils.loads(vif)
     vif = vif['versioned_object.data']['default_vif']
     network = (vif['versioned_object.data']['network']
@@ -298,14 +300,19 @@ def get_pod_ip(pod):
     return first_subnet_ip
 
 
-def get_annotated_labels(resource, annotation_labels):
+def get_annotations(resource, annotation):
     try:
         annotations = resource['metadata']['annotations']
-        labels_annotation = annotations[annotation_labels]
+        return annotations[annotation]
     except KeyError:
         return None
-    labels = jsonutils.loads(labels_annotation)
-    return labels
+
+
+def get_annotated_labels(resource, annotation_labels):
+    labels_annotation = get_annotations(resource, annotation_labels)
+    if labels_annotation:
+        return jsonutils.loads(labels_annotation)
+    return None
 
 
 def get_kuryrnetpolicy_crds(namespace=None):
@@ -438,6 +445,8 @@ def service_matches_affected_pods(service, pod_selectors):
             and False otherwise.
     """
     svc_selector = service['spec'].get('selector')
+    if not svc_selector:
+        return False
     for selector in pod_selectors:
         if match_selector(selector, svc_selector):
             return True
@@ -498,9 +507,14 @@ def get_ports(resource, port):
 
 def get_namespace(namespace_name):
     kubernetes = clients.get_kubernetes_client()
-    return kubernetes.get(
-        '{}/namespaces/{}'.format(
-            constants.K8S_API_BASE, namespace_name))
+    try:
+        return kubernetes.get(
+            '{}/namespaces/{}'.format(
+                constants.K8S_API_BASE, namespace_name))
+    except k_exc.K8sResourceNotFound:
+        LOG.debug("Namespace not found: %s",
+                  namespace_name)
+        return None
 
 
 def update_port_pci_info(pod, vif):
