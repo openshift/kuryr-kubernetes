@@ -56,6 +56,9 @@ class NamespacePodSubnetDriver(default_subnet.DefaultPodSubnetDriver):
         try:
             ns = kubernetes.get('%s/namespaces/%s' % (constants.K8S_API_BASE,
                                                       namespace))
+        except exceptions.K8sResourceNotFound:
+            LOG.warning("Namespace %s not found", namespace)
+            raise
         except exceptions.K8sClientException:
             LOG.exception("Kubernetes Client Exception.")
             raise exceptions.ResourceNotReady(namespace)
@@ -64,13 +67,16 @@ class NamespacePodSubnetDriver(default_subnet.DefaultPodSubnetDriver):
             annotations = ns['metadata']['annotations']
             net_crd_name = annotations[constants.K8S_ANNOTATION_NET_CRD]
         except KeyError:
-            LOG.exception("Namespace missing CRD annotations for selecting "
-                          "the corresponding subnet.")
+            LOG.warning("Namespace missing CRD annotations for selecting the "
+                        "corresponding subnet.")
             raise exceptions.ResourceNotReady(namespace)
 
         try:
             net_crd = kubernetes.get('%s/kuryrnets/%s' % (
                 constants.K8S_API_CRD, net_crd_name))
+        except exceptions.K8sResourceNotFound:
+            LOG.warning("Kuryrnet resource not yet created, retrying...")
+            raise exceptions.ResourceNotReady(net_crd_name)
         except exceptions.K8sClientException:
             LOG.exception("Kubernetes Client Exception.")
             raise
@@ -114,11 +120,22 @@ class NamespacePodSubnetDriver(default_subnet.DefaultPodSubnetDriver):
                     neutron.delete_port(leftover_port['id'])
                 except n_exc.PortNotFoundClient:
                     LOG.debug("Port already deleted.")
-                except n_exc.NeutronClientException:
-                    LOG.debug("Unexpected error deleting leftover port %s. "
-                              "Skiping it and continue with the other rest.",
-                              leftover_port['id'])
-                    continue
+                except n_exc.NeutronClientException as e:
+                    if "currently a subport for trunk" in str(e):
+                        LOG.warning("Port %s is in DOWN status but still "
+                                    "associated to a trunk. This should not "
+                                    "happen. Trying to delete it from the "
+                                    "trunk.", leftover_port['id'])
+                        # Get the trunk_id from the error message
+                        trunk_id = (
+                            str(e).split('trunk')[1].split('.')[0].strip())
+                        neutron.trunk_remove_subports(
+                            trunk_id, {'sub_ports': [
+                                {'port_id': leftover_port['id']}]})
+                    else:
+                        LOG.exception("Unexpected error deleting leftover "
+                                      "port %s. Skiping it and continue with "
+                                      "the other rest.", leftover_port['id'])
             raise exceptions.ResourceNotReady(net_id)
         except n_exc.NeutronClientException:
             LOG.exception("Error deleting network %s.", net_id)
@@ -144,17 +161,23 @@ class NamespacePodSubnetDriver(default_subnet.DefaultPodSubnetDriver):
             c_utils.tag_neutron_resources('networks', [neutron_net['id']])
 
             # create a subnet within that network
-            neutron_subnet = neutron.create_subnet(
-                {
-                    "subnet": {
-                        "network_id": neutron_net['id'],
-                        "ip_version": 4,
-                        "name": subnet_name,
-                        "enable_dhcp": False,
-                        "subnetpool_id": subnet_pool_id,
-                        "project_id": project_id
-                    }
-                }).get('subnet')
+            try:
+                neutron_subnet = neutron.create_subnet(
+                    {
+                        "subnet": {
+                            "network_id": neutron_net['id'],
+                            "ip_version": 4,
+                            "name": subnet_name,
+                            "enable_dhcp": False,
+                            "subnetpool_id": subnet_pool_id,
+                            "project_id": project_id
+                        }
+                    }).get('subnet')
+            except n_exc.Conflict:
+                LOG.debug("Max number of retries on neutron side achieved, "
+                          "raising ResourceNotReady to retry subnet creation "
+                          "for %s", subnet_name)
+                raise exceptions.ResourceNotReady(subnet_name)
             c_utils.tag_neutron_resources('subnets', [neutron_subnet['id']])
 
             # connect the subnet to the router

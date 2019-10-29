@@ -15,7 +15,6 @@
 
 from kuryr.lib._i18n import _
 from oslo_log import log as logging
-from oslo_serialization import jsonutils
 
 from kuryr_kubernetes import clients
 from kuryr_kubernetes import config
@@ -171,7 +170,7 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
                 config.CONF.kubernetes.endpoints_driver_octavia_provider)
 
     def on_present(self, endpoints):
-        lbaas_spec = self._get_lbaas_spec(endpoints)
+        lbaas_spec = utils.get_lbaas_spec(endpoints)
         if self._should_ignore(endpoints, lbaas_spec):
             LOG.debug("Ignoring Kubernetes endpoints %s",
                       endpoints['metadata']['name'])
@@ -288,7 +287,15 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
 
         lb = lbaas_state.loadbalancer
         default_sgs = config.CONF.neutron_defaults.pod_security_groups
-        lbaas_spec_sgs = lbaas_spec.security_groups_ids
+        # NOTE(maysams) As the endpoint and svc are annotated with the
+        # 'lbaas_spec' in two separate k8s calls, it's possible that
+        # the endpoint got annotated and the svc haven't due to controller
+        # restarts. For this case, a resourceNotReady exception is raised
+        # till the svc gets annotated with a 'lbaas_spec'.
+        if lbaas_spec:
+            lbaas_spec_sgs = lbaas_spec.security_groups_ids
+        else:
+            raise k_exc.ResourceNotReady(svc_link)
         if lb.security_groups and lb.security_groups != lbaas_spec_sgs:
             sgs = [lb_sg for lb_sg in lb.security_groups
                    if lb_sg not in default_sgs]
@@ -299,7 +306,11 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
     def _add_new_members(self, endpoints, lbaas_state, lbaas_spec):
         changed = False
 
-        self._sync_lbaas_sgs(endpoints, lbaas_state, lbaas_spec)
+        try:
+            self._sync_lbaas_sgs(endpoints, lbaas_state, lbaas_spec)
+        except k_exc.K8sResourceNotFound:
+            LOG.debug("The svc has been deleted while processing the endpoints"
+                      " update. No need to add new members.")
 
         lsnr_by_id = {l.id: l for l in lbaas_state.listeners}
         pool_by_lsnr_port = {(lsnr_by_id[p.listener_id].protocol,
@@ -590,6 +601,9 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
             self._drv_lbaas.release_loadbalancer(
                 loadbalancer=lb)
             lb = None
+            lbaas_state.pools = []
+            lbaas_state.listeners = []
+            lbaas_state.members = []
             changed = True
 
         if not lb:
@@ -614,15 +628,3 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
 
         lbaas_state.loadbalancer = lb
         return changed
-
-    def _get_lbaas_spec(self, endpoints):
-        # TODO(ivc): same as '_get_lbaas_state'
-        try:
-            annotations = endpoints['metadata']['annotations']
-            annotation = annotations[k_const.K8S_ANNOTATION_LBAAS_SPEC]
-        except KeyError:
-            return None
-        obj_dict = jsonutils.loads(annotation)
-        obj = obj_lbaas.LBaaSServiceSpec.obj_from_primitive(obj_dict)
-        LOG.debug("Got LBaaSServiceSpec from annotation: %r", obj)
-        return obj

@@ -69,19 +69,20 @@ class TestVIFHandler(test_base.TestCase):
         self._release_vif = self._handler._drv_vif_pool.release_vif
         self._activate_vif = self._handler._drv_vif_pool.activate_vif
         self._set_pod_state = self._handler._set_pod_state
-        self._is_pending_node = self._handler._is_pending_node
+        self._is_pod_scheduled = self._handler._is_pod_scheduled
         self._request_additional_vifs = \
             self._multi_vif_drv.request_additional_vifs
 
         self._request_vif.return_value = self._vif
         self._request_additional_vifs.return_value = self._additioan_vifs
-        self._is_pending_node.return_value = True
+        self._is_pod_scheduled.return_value = True
         self._get_project.return_value = self._project_id
         self._get_subnets.return_value = self._subnets
         self._get_security_groups.return_value = self._security_groups
         self._set_vifs_driver.return_value = mock.Mock(
             spec=drivers.PodVIFDriver)
 
+    @mock.patch.object(h_vif.VIFHandler, '_is_network_policy_enabled')
     @mock.patch.object(drivers.MultiVIFDriver, 'get_enabled_drivers')
     @mock.patch.object(drivers.VIFPoolDriver, 'set_vif_driver')
     @mock.patch.object(drivers.VIFPoolDriver, 'get_instance')
@@ -90,10 +91,11 @@ class TestVIFHandler(test_base.TestCase):
     @mock.patch.object(drivers.PodSubnetsDriver, 'get_instance')
     @mock.patch.object(drivers.PodProjectDriver, 'get_instance')
     @mock.patch.object(drivers.LBaaSDriver, 'get_instance')
-    def test_init(self, m_get_lbaas_driver, m_get_project_driver,
-                  m_get_subnets_driver, m_get_sg_driver, m_get_vif_driver,
-                  m_get_vif_pool_driver, m_set_vifs_driver,
-                  m_get_multi_vif_drivers):
+    @mock.patch.object(drivers.ServiceSecurityGroupsDriver, 'get_instance')
+    def test_init(self, m_get_svc_sg_driver, m_get_lbaas_driver,
+                  m_get_project_driver, m_get_subnets_driver, m_get_sg_driver,
+                  m_get_vif_driver, m_get_vif_pool_driver, m_set_vifs_driver,
+                  m_get_multi_vif_drivers, m_is_network_policy_enabled):
         project_driver = mock.sentinel.project_driver
         subnets_driver = mock.sentinel.subnets_driver
         sg_driver = mock.sentinel.sg_driver
@@ -101,6 +103,7 @@ class TestVIFHandler(test_base.TestCase):
         vif_pool_driver = mock.Mock(spec=drivers.VIFPoolDriver)
         multi_vif_drivers = [mock.MagicMock(spec=drivers.MultiVIFDriver)]
         lbaas_driver = mock.sentinel.lbaas_driver
+        svc_sg_driver = mock.Mock(spec=drivers.ServiceSecurityGroupsDriver)
         m_get_project_driver.return_value = project_driver
         m_get_subnets_driver.return_value = subnets_driver
         m_get_sg_driver.return_value = sg_driver
@@ -108,6 +111,8 @@ class TestVIFHandler(test_base.TestCase):
         m_get_vif_pool_driver.return_value = vif_pool_driver
         m_get_multi_vif_drivers.return_value = multi_vif_drivers
         m_get_lbaas_driver.return_value = lbaas_driver
+        m_get_svc_sg_driver.return_value = svc_sg_driver
+        m_is_network_policy_enabled.return_value = True
 
         handler = h_vif.VIFHandler()
 
@@ -117,21 +122,22 @@ class TestVIFHandler(test_base.TestCase):
         self.assertEqual(vif_pool_driver, handler._drv_vif_pool)
         self.assertEqual(multi_vif_drivers, handler._drv_multi_vif)
         self.assertEqual(lbaas_driver, handler._drv_lbaas)
+        self.assertEqual(svc_sg_driver, handler._drv_svc_sg)
 
-    def test_is_pending_node(self):
-        self.assertTrue(h_vif.VIFHandler._is_pending_node(self._pod))
+    def test_is_pod_scheduled(self):
+        self.assertTrue(h_vif.VIFHandler._is_pod_scheduled(self._pod))
 
     def test_is_not_pending(self):
         self._pod['status']['phase'] = 'Unknown'
-        self.assertFalse(h_vif.VIFHandler._is_pending_node(self._pod))
+        self.assertFalse(h_vif.VIFHandler._is_pod_scheduled(self._pod))
 
     def test_is_pending_no_node(self):
         self._pod['spec']['nodeName'] = None
-        self.assertFalse(h_vif.VIFHandler._is_pending_node(self._pod))
+        self.assertFalse(h_vif.VIFHandler._is_pod_scheduled(self._pod))
 
     def test_unset_pending(self):
-        self.assertFalse(h_vif.VIFHandler._is_pending_node({'spec': {},
-                                                            'status': {}}))
+        self.assertFalse(h_vif.VIFHandler._is_pod_scheduled({'spec': {},
+                                                             'status': {}}))
 
     @mock.patch('kuryr_kubernetes.controller.drivers.utils.'
                 'update_port_pci_info')
@@ -169,7 +175,7 @@ class TestVIFHandler(test_base.TestCase):
     def test_on_present_not_pending(self, m_get_pod_state, m_host_network):
         m_get_pod_state.return_value = self._state
         m_host_network.return_value = False
-        self._is_pending_node.return_value = False
+        self._is_pod_scheduled.return_value = False
 
         h_vif.VIFHandler.on_present(self._handler, self._pod)
 

@@ -40,7 +40,7 @@ VALID_MULTI_POD_POOLS_OPTS = {'noop': ['neutron-vif',
                               'neutron': ['neutron-vif'],
                               'nested': ['nested-vlan'],
                               }
-DEFAULT_TIMEOUT = 180
+DEFAULT_TIMEOUT = 500
 DEFAULT_INTERVAL = 3
 
 subnet_caching_opts = [
@@ -242,9 +242,10 @@ def has_kuryr_crd(crd_url):
     return True
 
 
-def get_lbaas_spec(service):
+def get_lbaas_spec(k8s_object):
+    # k8s_object can be service or endpoint
     try:
-        annotations = service['metadata']['annotations']
+        annotations = k8s_object['metadata']['annotations']
         annotation = annotations[constants.K8S_ANNOTATION_LBAAS_SPEC]
     except KeyError:
         return None
@@ -271,14 +272,22 @@ def set_lbaas_spec(service, lbaas_spec):
     try:
         k8s.annotate(ep_link,
                      {constants.K8S_ANNOTATION_LBAAS_SPEC: annotation})
-    except exceptions.K8sResourceNotFound:
+    except exceptions.K8sResourceNotFound as ex:
+        LOG.debug("Failed to annotate svc: %s", ex)
         raise exceptions.ResourceNotReady(ep_link)
     except exceptions.K8sClientException:
         LOG.debug("Failed to annotate endpoint %r", ep_link)
         raise
-    k8s.annotate(svc_link,
-                 {constants.K8S_ANNOTATION_LBAAS_SPEC: annotation},
-                 resource_version=service['metadata']['resourceVersion'])
+    try:
+        k8s.annotate(svc_link,
+                     {constants.K8S_ANNOTATION_LBAAS_SPEC: annotation},
+                     resource_version=service['metadata']['resourceVersion'])
+    except exceptions.K8sResourceNotFound as ex:
+        LOG.debug("Failed to annotate svc: %s", ex)
+        raise exceptions.ResourceNotReady(svc_link)
+    except exceptions.K8sClientException:
+        LOG.exception("Failed to annotate svc: %r", svc_link)
+        raise
 
 
 def get_lbaas_state(endpoint):
