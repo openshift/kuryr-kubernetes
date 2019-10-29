@@ -12,7 +12,6 @@
 import os
 import sys
 
-from keystoneauth1 import loading as ks_loading
 from kuryr.lib._i18n import _
 from kuryr.lib import config as lib_config
 from oslo_config import cfg
@@ -308,40 +307,6 @@ sriov_opts = [
                 default=DEFAULT_PHYSNET_SUBNET_MAPPINGS),
 ]
 
-# Those are taken from kuryr-lib.
-neutron_group = cfg.OptGroup(
-    'neutron',
-    title='Neutron Options',
-    help=_('Configuration options for OpenStack Neutron'))
-
-neutron_opts = [
-    cfg.StrOpt('enable_dhcp',
-               default='True',
-               help=_('Enable or Disable dhcp for neutron subnets.')),
-    cfg.StrOpt('default_subnetpool_v4',
-               default='kuryr',
-               help=_('Name of default subnetpool version 4')),
-    cfg.StrOpt('default_subnetpool_v6',
-               default='kuryr6',
-               help=_('Name of default subnetpool version 6')),
-    cfg.BoolOpt('vif_plugging_is_fatal',
-                default=False,
-                help=_("Whether a plugging operation is failed if the port "
-                       "to plug does not become active")),
-    cfg.IntOpt('vif_plugging_timeout',
-               default=0,
-               help=_("Seconds to wait for port to become active")),
-    cfg.StrOpt('region_name',
-               default=None,
-               help=_('Region name of the neturon endpoint to use.')),
-    cfg.StrOpt('endpoint_type',
-               default='public',
-               choices=['public', 'admin', 'internal'],
-               help=_('Type of the neutron endpoint to use. This endpoint '
-                      'will be looked up in the keystone catalog and should '
-                      'be one of public, internal or admin.')),
-]
-
 
 CONF = cfg.CONF
 CONF.register_opts(kuryr_k8s_opts)
@@ -356,12 +321,7 @@ CONF.register_opts(sriov_opts, group='sriov')
 
 CONF.register_opts(lib_config.core_opts)
 CONF.register_opts(lib_config.binding_opts, 'binding')
-
-# Taken from kuryr-lib
-CONF.register_group(neutron_group)
-CONF.register_opts(neutron_opts, group=neutron_group)
-ks_loading.register_session_conf_options(CONF, neutron_group.name)
-ks_loading.register_auth_conf_options(CONF, neutron_group.name)
+lib_config.register_neutron_opts(CONF)
 
 logging.register_options(CONF)
 
