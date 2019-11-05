@@ -224,7 +224,9 @@ class CNIDaemonWatcherService(cotyledon.Service):
                     self.registry[pod_name]['pod']['metadata']['uid']
                     != pod['metadata']['uid']):
                 self.registry[pod_name] = {'pod': pod, 'vifs': vif_dict,
-                                           'containerid': None}
+                                           'containerid': None,
+                                           'vif_unplugged': False,
+                                           'del_received': False}
             else:
                 # NOTE(dulek): Only update vif if its status changed, we don't
                 #              need to care about other changes now.
@@ -244,12 +246,20 @@ class CNIDaemonWatcherService(cotyledon.Service):
         pod_name = utils.get_pod_unique_name(pod)
         try:
             if pod_name in self.registry:
-                # NOTE(dulek): del on dict is atomic as long as we use standard
-                #              types as keys. This is the case, so we don't
-                #              need to lock here.
-                del self.registry[pod_name]
+                # NOTE(ndesh): We need to lock here to avoid race condition
+                #              with the deletion code for CNI DEL so that
+                #              we delete the registry entry exactly once
+                with lockutils.lock(pod_name, external=True):
+                    if self.registry[pod_name]['vif_unplugged']:
+                        del self.registry[pod_name]
+                    else:
+                        pod_dict = self.registry[pod_name]
+                        pod_dict['del_received'] = True
+                        self.registry[pod_name] = pod_dict
         except KeyError:
             # This means someone else removed it. It's odd but safe to ignore.
+            LOG.debug('Pod %s entry already removed from registry while '
+                      'handling DELETED event. Ignoring.', pod_name)
             pass
 
     def terminate(self):
