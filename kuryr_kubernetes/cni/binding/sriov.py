@@ -20,6 +20,7 @@ from oslo_concurrency import lockutils
 from oslo_concurrency import processutils
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_serialization import jsonutils
 
 from kuryr_kubernetes import clients
 from kuryr_kubernetes.cni.binding import base as b_base
@@ -48,17 +49,105 @@ class VIFSriovDriver(object):
 
     @release_lock_object
     def connect(self, vif, ifname, netns, container_id):
+        pci_info = self._process_vif(vif, ifname, netns)
+        self._save_pci_info(vif.id, pci_info)
+
+    def disconnect(self, vif, ifname, netns, container_id):
+        # NOTE(k.zaitsev): when netns is deleted the interface is
+        # returned automatically to host netns. We may reset
+        # it to all-zero state
+        self._return_device_driver(vif)
+        self._remove_pci_info(vif.id)
+
+    def _process_vif(self, vif, ifname, netns):
+        pr_client = clients.get_pod_resources_client()
+        pod_resources_list = pr_client.list()
+        resources = pod_resources_list.pod_resources
+        pod_name = vif.pod_name
+        pod_link = vif.pod_link
         physnet = vif.physnet
-        pf_names = self._get_host_pf_names(physnet)
-        vf_name, vf_index, pf, pci_info = self._get_available_vf_info(pf_names)
-
-        if not vf_name:
+        resource_name = self._get_resource_by_physnet(physnet)
+        driver = self._get_driver_by_res(resource_name)
+        resource = self._make_resource(resource_name)
+        LOG.debug("Vif %s will correspond to pci device belonging to "
+                  "resource %s", vif, resource)
+        pod_devices = self._get_pod_devices(pod_link)
+        pod_resource = None
+        container_devices = None
+        for res in resources:
+            if res.name == pod_name:
+                pod_resource = res
+                break
+        if not pod_resource:
             raise exceptions.CNIError(
-                "No free interfaces for physnet {} available".format(physnet))
+                "No resources are discovered for pod {}".format(pod_name))
+        LOG.debug("Looking for PCI device used by kubelet service and not "
+                  "used by pod %s yet ...", pod_name)
+        for container in pod_resource.containers:
+            try:
+                container_devices = container.devices
+            except Exception:
+                LOG.warning("No devices in container %s",
+                            container.name)
+                continue
 
-        LOG.debug("Connect {} as {} (port_id={}) in container_id={}".format(
-            vf_name, ifname, vif.id, container_id))
+            for dev in container_devices:
+                if dev.resource_name != resource:
+                    continue
 
+                for pci in dev.device_ids:
+                    if pci in pod_devices:
+                        continue
+                    LOG.debug("Appropriate PCI device %s is found", pci)
+                    pci_info = self._compute_pci(pci, driver,
+                                                 pod_link, vif,
+                                                 ifname, netns)
+                    return pci_info
+
+    def _get_resource_by_physnet(self, physnet):
+        mapping = config.CONF.sriov.physnet_resource_mappings
+        try:
+            resource_name = mapping[physnet]
+        except KeyError:
+            LOG.exception("No resource name for physnet %s", physnet)
+            raise
+        return resource_name
+
+    def _make_resource(self, res_name):
+        res_prefix = config.CONF.sriov.device_plugin_resource_prefix
+        return res_prefix + '/' + res_name
+
+    def _get_driver_by_res(self, resource_name):
+        mapping = config.CONF.sriov.resource_driver_mappings
+        try:
+            driver = mapping[resource_name]
+        except KeyError:
+            LOG.exception("No driver for resource_name %s", resource_name)
+            raise
+        return driver
+
+    def _compute_pci(self, pci, driver, pod_link, vif, ifname, netns):
+        port_id = vif.id
+        vf_name, vf_index, pf, pci_info = self._get_vf_info(pci, driver)
+        if driver in constants.USERSPACE_DRIVERS:
+            LOG.info("PCI device %s will be rebinded to userspace network "
+                     "driver %s", pci, driver)
+            self._set_vf_mac(pf, vf_index, vif.address)
+            if vif.network.should_provide_vlan:
+                vlan_id = vif.network.vlan
+                self._set_vf_vlan(pf, vf_index, vlan_id)
+            old_driver = self._bind_device(pci, driver)
+            self._annotate_device(pod_link, pci, old_driver, driver, port_id)
+        else:
+            LOG.info("PCI device %s will be moved to container's net ns %s",
+                     pci, netns)
+            pci_info = self._move_to_netns(pci, ifname, netns, vif, vf_name,
+                                           vf_index, pf, pci_info)
+            self._annotate_device(pod_link, pci, driver, driver, port_id)
+        return pci_info
+
+    def _move_to_netns(self, pci, ifname, netns, vif, vf_name, vf_index, pf,
+                       pci_info):
         if vif.network.should_provide_vlan:
             vlan_id = vif.network.vlan
             self._set_vf_vlan(pf, vf_index, vlan_id)
@@ -74,57 +163,104 @@ class VIFSriovDriver(object):
                 iface.mtu = vif.network.mtu
                 iface.up()
 
-        self._save_pci_info(vif.id, pci_info)
+        return pci_info
 
-    def disconnect(self, vif, ifname, netns, container_id):
-        # NOTE(k.zaitsev): when netns is deleted the interface is
-        # returned automatically to host netns. We may reset
-        # it to all-zero state
-        self._remove_pci_info(vif.id)
+    def _get_vf_info(self, pci, driver):
+        vf_sys_path = '/sys/bus/pci/devices/{}/net/'.format(pci)
+        if not os.path.exists(vf_sys_path):
+            if driver not in constants.USERSPACE_DRIVERS:
+                raise OSError(_("No vf name for device {}").format(pci))
+            vf_name = None
+        else:
+            vf_names = os.listdir(vf_sys_path)
+            vf_name = vf_names[0]
 
-    def _get_host_pf_names(self, physnet):
-        """Return a list of PFs, that belong to a physnet"""
+        pfysfn_path = '/sys/bus/pci/devices/{}/physfn/net/'.format(pci)
+        pf_names = os.listdir(pfysfn_path)
+        pf_name = pf_names[0]
 
-        if physnet not in self._device_pf_mapping:
-            raise cfg.Error(
-                "No mapping for physnet {} in {}".format(
-                    physnet, self._device_pf_mapping))
-        return self._device_pf_mapping[physnet]
-
-    def _get_available_vf_info(self, pf_names):
-        """Scan /sys for unacquired VF among PFs in pf_names"""
-
-        for pf in pf_names:
-            pf_sys_path = '/sys/class/net/{}/device'.format(pf)
-            nvfs = self._get_total_vfs(pf)
-            for vf_index in range(nvfs):
-                vf_sys_path = os.path.join(pf_sys_path,
-                                           'virtfn{}'.format(vf_index),
-                                           'net')
-                # TODO(kzaitsev): use /var/run/kuryr/smth
-                lock_path = os.path.join("/tmp",
-                                         "{}.{}".format(pf, vf_index))
-                self._acquire(lock_path)
-                LOG.debug("Aquired %s lock", lock_path)
-                try:
-                    vf_names = os.listdir(vf_sys_path)
-                except OSError:
-                    LOG.debug("Could not open %s. "
-                              "Skipping vf %s for pf %s", vf_sys_path,
-                              vf_index, pf)
-                    self._release()
-                    continue
-                if not vf_names:
-                    LOG.debug("No interfaces in %s. "
-                              "Skipping vf %s for pf %s", vf_sys_path,
-                              vf_index, pf)
-                    self._release()
-                    continue
-                vf_name = vf_names[0]
-                pci_info = self._get_pci_info(pf, vf_index)
-                LOG.debug("Aquiring vf %s of pf %s", vf_index, pf)
-                return vf_name, vf_index, pf, pci_info
+        nvfs = self._get_total_vfs(pf_name)
+        pf_sys_path = '/sys/class/net/{}/device'.format(pf_name)
+        for vf_index in range(nvfs):
+            virtfn_path = os.path.join(pf_sys_path,
+                                       'virtfn{}'.format(vf_index))
+            vf_pci = os.path.basename(os.readlink(virtfn_path))
+            if vf_pci == pci:
+                pci_info = self._get_pci_info(pf_name, vf_index)
+                return vf_name, vf_index, pf_name, pci_info
         return None, None, None, None
+
+    def _bind_device(self, pci, driver, old_driver=None):
+        if not old_driver:
+            old_driver_path = '/sys/bus/pci/devices/{}/driver'.format(pci)
+            old_driver_link = os.readlink(old_driver_path)
+            old_driver = os.path.basename(old_driver_link)
+        unbind_path = '/sys/bus/pci/drivers/{}/unbind'.format(old_driver)
+        bind_path = '/sys/bus/pci/drivers/{}/bind'.format(driver)
+
+        with open(unbind_path, 'w') as unbind_fd:
+            unbind_fd.write(pci)
+
+        owerride = "/sys/bus/pci/devices/{}/driver_override".format(pci)
+        with open(owerride, 'w') as owerride_fd:
+            owerride_fd.write("\00")
+
+        with open(owerride, 'w') as owerride_fd:
+            owerride_fd.write(driver)
+
+        with open(bind_path, 'w') as bind_fd:
+            bind_fd.write(pci)
+
+        LOG.info("Device %s was binded on driver %s. Old driver is %s", pci,
+                 driver, old_driver)
+        return old_driver
+
+    def _annotate_device(self, pod_link, pci, old_driver, new_driver, port_id):
+        old_driver_title = constants.K8S_ANNOTATION_OLD_DRIVER
+        current_driver_title = constants.K8S_ANNOTATION_CURRENT_DRIVER
+        neutron_port_title = constants.K8S_ANNOTATION_NEUTRON_PORT
+        k8s = clients.get_kubernetes_client()
+        pod_devices = self._get_pod_devices(pod_link)
+        pod_devices[pci] = {old_driver_title: old_driver,
+                            current_driver_title: new_driver,
+                            neutron_port_title: port_id}
+        pod_devices = jsonutils.dumps(pod_devices)
+
+        LOG.debug("Trying to annotate pod %s with pci %s, old driver %s "
+                  "and new driver %s", pod_link, pci, old_driver, new_driver)
+        k8s.annotate(pod_link,
+                     {constants.K8S_ANNOTATION_PCI_DEVICES: pod_devices})
+
+    def _get_pod_devices(self, pod_link):
+        k8s = clients.get_kubernetes_client()
+        pod = k8s.get(pod_link)
+        annotations = pod['metadata']['annotations']
+        try:
+            json_devices = annotations[constants.K8S_ANNOTATION_PCI_DEVICES]
+            devices = jsonutils.loads(json_devices)
+        except KeyError:
+            devices = {}
+        except Exception as ex:
+            LOG.exception("Exception while getting annotations: %s", ex)
+        LOG.debug("Pod %s has devices %s", pod_link, devices)
+        return devices
+
+    def _return_device_driver(self, vif):
+        neutron_port_title = constants.K8S_ANNOTATION_NEUTRON_PORT
+        old_driver_title = constants.K8S_ANNOTATION_OLD_DRIVER
+        current_driver_title = constants.K8S_ANNOTATION_CURRENT_DRIVER
+        if not hasattr(vif, 'pod_link'):
+            return
+        pod_link = vif.pod_link
+        pod_devices = self._get_pod_devices(pod_link)
+        for pci, info in pod_devices.items():
+            if info[neutron_port_title] == vif.id:
+                if info[old_driver_title] != info[current_driver_title]:
+                    LOG.debug("Driver of device %s should be changed back",
+                              pci)
+                    self._bind_device(pci,
+                                      info[old_driver_title],
+                                      info[current_driver_title])
 
     def _get_pci_info(self, pf, vf_index):
         pci_slot = ''

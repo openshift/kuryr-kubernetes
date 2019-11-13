@@ -4,7 +4,7 @@ LABEL authors="Antoni Segura Puimedon<toni@kuryr.org>, Michał Dulko<mdulko@redh
 ARG UPPER_CONSTRAINTS_FILE="https://releases.openstack.org/constraints/upper/master"
 
 RUN dnf update -y \
-    && dnf install -y --setopt=tsflags=nodocs python36 \
+    && dnf install -y --setopt=tsflags=nodocs python36 libstdc++ \
     && dnf install -y --setopt=tsflags=nodocs gcc git
 
 COPY . /opt/kuryr-kubernetes

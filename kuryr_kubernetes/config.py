@@ -275,6 +275,9 @@ sriov_opts = [
     cfg.StrOpt('kubelet_root_dir',
                help=_("The root directory of the Kubelet daemon"),
                default='/var/lib/kubelet'),
+    cfg.BoolOpt('enable_pod_resource_service',
+                help=_("Enable PodResources service"),
+                default=False),
     cfg.DictOpt('default_physnet_subnets',
                 help=_("A mapping of default subnets for certain physnets "
                        "in a form of physnet-name:<SUBNET-ID>"),
@@ -298,6 +301,11 @@ sriov_opts = [
                       "It concatenates with resource suffix defined in "
                       "sriov device plugin configuration file."),
                default=constants.K8S_SRIOV_PREFIX),
+    cfg.DictOpt('resource_driver_mappings',
+                help=_("A mappping driver names for certain resource "
+                       "names. Expected that device of VIF related to "
+                       "exact physnet should be binded on specified driver."),
+                default=DEFAULT_PHYSNET_SUBNET_MAPPINGS),
 ]
 
 # Those are taken from kuryr-lib.
