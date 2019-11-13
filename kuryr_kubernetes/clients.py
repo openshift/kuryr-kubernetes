@@ -16,9 +16,7 @@
 from functools import partial
 import os
 
-from keystoneauth1 import loading as ks_loading
 from kuryr.lib import utils
-from neutronclient.v2_0 import client
 from openstack import connection
 from openstack import exceptions as os_exc
 from openstack.network.v2 import port as os_port
@@ -32,7 +30,6 @@ _NEUTRON_CLIENT = 'neutron-client'
 _KUBERNETES_CLIENT = 'kubernetes-client'
 _OPENSTACKSDK = 'openstacksdk'
 _POD_RESOURCES_CLIENT = 'pod-resources-client'
-CONF = config.CONF
 
 
 def get_network_client():
@@ -66,18 +63,7 @@ def setup_clients():
 
 
 def setup_neutron_client():
-    # Taken from kuryr.lib
-    conf_group = config.neutron_group.name
-    auth_plugin = ks_loading.load_auth_from_conf_options(CONF, conf_group)
-    session = ks_loading.load_session_from_conf_options(CONF, conf_group,
-                                                        auth=auth_plugin)
-    endpoint_type = getattr(getattr(CONF, conf_group), 'endpoint_type')
-    region_name = getattr(getattr(CONF, conf_group), 'region_name')
-
-    _clients[_NEUTRON_CLIENT] = client.Client(session=session,
-                                              auth=auth_plugin,
-                                              endpoint_type=endpoint_type,
-                                              region_name=region_name)
+    _clients[_NEUTRON_CLIENT] = utils.get_neutron_client()
 
 
 def setup_kubernetes_client():
