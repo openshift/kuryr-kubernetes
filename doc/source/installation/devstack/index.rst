@@ -20,6 +20,7 @@
       (Avoid deeper levels because they do not render well.)
 
 
+===========================
 DevStack based Installation
 ===========================
 
@@ -27,14 +28,15 @@ This section describes how you can install and configure kuryr-kubernetes with
 DevStack for testing different functionality, such as nested or different
 ML2 drivers.
 
-.. toctree::
-    :maxdepth: 1
 
-    basic
-    nested-vlan
-    nested-macvlan
-    odl_support
-    ovn_support
-    dragonflow_support
-    containerized
-    ports-pool
+.. toctree::
+   :maxdepth: 1
+
+   basic
+   nested-vlan
+   nested-macvlan
+   odl_support
+   ovn_support
+   dragonflow_support
+   containerized
+   ports-pool

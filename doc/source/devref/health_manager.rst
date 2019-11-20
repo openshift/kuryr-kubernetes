@@ -16,15 +16,16 @@
 Kuryr Kubernetes Health Manager Design
 ======================================
 
-
 Purpose
 -------
+
 The purpose of this document is to present the design decision behind
 Kuryr Kubernetes Health Managers.
 
 The main purpose of the Health Managers is to perform Health verifications that
 assures readiness and liveness to Kuryr Controller and CNI pod, and so improve
 the management that Kubernetes does on Kuryr-Kubernetes pods.
+
 
 Overview
 --------
@@ -46,8 +47,10 @@ configurations are properly verified to assure CNI daemon is in a good shape.
 On this way, the CNI Health Manager will check and serve the health state to
 Kubernetes readiness and liveness probes.
 
+
 Proposed Solution
 -----------------
+
 One of the endpoints provided by the Controller Health Manager will check
 whether it is able to watch the Kubernetes API, authenticate with Keystone
 and talk to Neutron, since these are services needed by Kuryr Controller.
@@ -62,12 +65,15 @@ CNI ADD failure is reached, health of CNI components and existence of memory
 leak.
 
 .. note::
-  The CNI Health Manager will be started with the check for memory leak
-  disabled. In order to enable, set the following option in kuryr.conf to a
-  limit value of memory in MiBs.
 
-    [cni_health_server]
-    max_memory_usage = -1
+   The CNI Health Manager will be started with the check for memory leak
+   disabled. In order to enable, set the following option in kuryr.conf to a
+   limit value of memory in MiBs.
+
+   .. code-block:: ini
+
+      [cni_health_server]
+      max_memory_usage = -1
 
 The CNI Health Manager is added as a process to CNI daemon and communicates
 to the other two processes i.e. Watcher and Server with a shared boolean
