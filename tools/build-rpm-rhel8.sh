@@ -1,6 +1,6 @@
 #!/bin/bash -x
 
-version=4.3.1
+version=4.4.1
 source_path=_output/SOURCES
 
 mkdir -p ${source_path}

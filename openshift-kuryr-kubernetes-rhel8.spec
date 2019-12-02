@@ -13,7 +13,7 @@ with OpenStack networking.
 %global commit 0000000
 
 Name:      openshift-%project
-Version:   4.3.1
+Version:   4.4.1
 Release:   1%{?dist}
 Summary:   OpenStack networking integration with OpenShift and Kubernetes
 License:   ASL 2.0
@@ -44,9 +44,12 @@ BuildRequires:  python3-pbr
 BuildRequires:  systemd-units
 
 Requires:       python3-%{project}-lib >= 0.5.0
-Requires:       python3-pyroute2 >= 0.4.21
+# NOTE(dulek): We should have pyroute2 0.5.7 here, but it's not avalable in
+# repos we have access to. Sticking with 0.5.3 should be fine as long as we
+# don't support SR-IOV stuff.
+Requires:       python3-pyroute2 >= 0.5.3
 Requires:       python3-requests >= 2.14.2
-Requires:       python3-eventlet >= 0.18.2
+Requires:       python3-eventlet >= 0.22.0
 Requires:       python3-oslo-cache >= 1.26.0
 Requires:       python3-oslo-config >= 2:5.2.0
 Requires:       python3-oslo-log >= 3.36.0
@@ -57,11 +60,13 @@ Requires:       python3-oslo-utils >= 3.33.0
 Requires:       python3-os-vif >= 1.7.0
 Requires:       python3-six >= 1.10.0
 Requires:       python3-stevedore >= 1.20.0
-Requires:       python3-cotyledon >= 1.3.0
-Requires:       python3-flask >= 0.10.0
+Requires:       python3-cotyledon >= 1.5.0
+Requires:       python3-flask >= 0.12.3
 Requires:       python3-retrying >= 1.2.3
 Requires:       python3-grpcio >= 1.12.0
 Requires:       python3-protobuf >= 3.6.0
+Requires:       python3-openstacksdk >= 0.17.0
+Requires:       python3-prettytable >= 0.7.2
 
 %description -n python3-%{service}
 %{common_desc}
