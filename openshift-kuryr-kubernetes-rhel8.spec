@@ -60,8 +60,6 @@ Requires:       python3-stevedore >= 1.20.0
 Requires:       python3-cotyledon >= 1.3.0
 Requires:       python3-flask >= 0.10.0
 Requires:       python3-retrying >= 1.2.3
-Requires:       python3-grpcio >= 1.12.0
-Requires:       python3-protobuf >= 3.6.0
 
 %description -n python3-%{service}
 %{common_desc}
