@@ -25,13 +25,11 @@ from openstack.network.v2 import port as os_port
 
 from kuryr_kubernetes import config
 from kuryr_kubernetes import k8s_client
-from kuryr_kubernetes.pod_resources import client as pr_client
 
 _clients = {}
 _NEUTRON_CLIENT = 'neutron-client'
 _KUBERNETES_CLIENT = 'kubernetes-client'
 _OPENSTACKSDK = 'openstacksdk'
-_POD_RESOURCES_CLIENT = 'pod-resources-client'
 CONF = config.CONF
 
 
@@ -53,10 +51,6 @@ def get_loadbalancer_client():
 
 def get_kubernetes_client():
     return _clients[_KUBERNETES_CLIENT]
-
-
-def get_pod_resources_client():
-    return _clients[_POD_RESOURCES_CLIENT]
 
 
 def setup_clients():
@@ -111,8 +105,3 @@ def setup_openstacksdk():
         region_name=getattr(config.CONF.neutron, 'region_name', None))
     conn.network.create_ports = partial(_create_ports, conn.network)
     _clients[_OPENSTACKSDK] = conn
-
-
-def setup_pod_resources_client():
-    root_dir = config.CONF.sriov.kubelet_root_dir
-    _clients[_POD_RESOURCES_CLIENT] = pr_client.PodResourcesClient(root_dir)
