@@ -24,7 +24,7 @@ class TestK8sClient(test_base.TestCase):
     @mock.patch('openstack.connection.Connection')
     @mock.patch('kuryr_kubernetes.config.CONF')
     @mock.patch('kuryr_kubernetes.k8s_client.K8sClient')
-    @mock.patch('kuryr.lib.utils.get_neutron_client')
+    @mock.patch('neutronclient.v2_0.client.Client')
     def test_setup_clients(self, m_neutron, m_k8s, m_cfg, m_openstack):
         k8s_api_root = 'http://127.0.0.1:1234'
 
