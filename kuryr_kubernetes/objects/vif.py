@@ -73,13 +73,10 @@ class VIFMacvlanNested(obj_osvif.VIFBase):
 @obj_base.VersionedObjectRegistry.register
 class VIFSriov(obj_osvif.VIFDirect):
     # This is OVO based SRIOV vif.
-    # Version 1.0: Initial version
-    # Version 1.1: Added pod_name field and pod_link field.
-    VERSION = '1.1'
+
+    VERSION = '1.0'
 
     fields = {
         # physnet of the VIF
         'physnet': obj_fields.StringField(),
-        'pod_name': obj_fields.StringField(),
-        'pod_link': obj_fields.StringField(),
     }

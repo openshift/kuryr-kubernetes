@@ -58,119 +58,106 @@ a SR-IOV port on a baremetal installation the 3 following steps should be done:
         name: my-pod
         namespace: my-namespace
         annotations:
-          k8s.v1.cni.cncf.io/networks: sriov-net1,sriov-net2
-      spec:
-        containers:
-        - name: containerName
-          image: containerImage
-          imagePullPolicy: IfNotPresent
-          command: ["tail", "-f", "/dev/null"]
-          resources:
-            requests:
-              intel.com/sriov: '2'
-            limits:
-              intel.com/sriov: '2'
-
-   In the above example two SR-IOV devices will be attached to pod. First one
-   is described in sriov-net1 NetworkAttachmentDefinition, second one in
-   sriov-net2. They may have different subnetId.
-
-#. Specify resource names
-
-   The resource name *intel.com/sriov*, which used in the above example is the
-   default resource name. This name was used in SR-IOV network device plugin in
-   version 1 (release-v1 branch). But since latest version the device plugin
-   can use any arbitrary name of the resources (see `SRIOV network device
-   plugin for Kubernetes`_). This name should match "^\[a-zA-Z0-9\_\]+$"
-   regular expression. To be able to work with arbitrary resource names
-   physnet_resource_mappings and device_plugin_resource_prefix in [sriov]
-   section of kuryr-controller configuration file should be filled.  The
-   default value for device_plugin_resource_prefix is intel.com, the same as in
-   SR-IOV network device plugin, in case of SR-IOV network device plugin was
-   started with value of -resource-prefix option different from intel.com, than
-   value should be set to device_plugin_resource_prefix, otherwise
-   kuryr-kubernetes will not work with resource.
-
-   Assume we have following SR-IOV network device plugin (defined by
-   -config-file option)
-
-   .. code-block:: json
-
-      {
-          "resourceList":
-              [
-                 {
-                    "resourceName": "numa0",
-                    "rootDevices": ["0000:02:00.0"],
-                    "sriovMode": true,
-                    "deviceType": "netdevice"
-                 }
-              ]
-      }
-
-   We defined numa0 resource name, also assume we started sriovdp with
-   -resource-prefix samsung.com value. The PCI address of ens4f0 interface is
-   "0000:02:00.0". If we assigned 8 VF to ens4f0 and launch SR-IOV network
-   device plugin, we can see following state of kubernetes
-
-   .. code-block:: console
-
-      $ kubectl get node node1 -o json | jq '.status.allocatable'
-      {
-        "cpu": "4",
-        "ephemeral-storage": "269986638772",
-        "hugepages-1Gi": "8Gi",
-        "hugepages-2Mi": "0Gi",
-        "samsung.com/numa0": "8",
-        "memory": "7880620Ki",
-        "pods": "1k"
-      }
-
-   We have to add to the sriov section following mapping:
-
-   .. code-block:: ini
-
-      [sriov]
-      device_plugin_resource_prefix = samsung.com
-      physnet_resource_mappings = physnet1:numa0
-
-#. Enable Kubelet Pod Resources feature
-
-   To use SR-IOV functionality properly it is necessary to enable Kubelet Pod
-   Resources feature. Pod Resources is a service provided by Kubelet via gRPC
-   server that allows to request list of resources allocated for each pod and
-   container on the node. These resources are devices allocated by k8s device
-   plugins. Service was implemented mainly for monitoring purposes, but it also
-   suitable for SR-IOV binding driver allowing it to know which VF was
-   allocated for particular container.
-
-   To enable Pod Resources service it is needed to add ``--feature-gates
-   KubeletPodResources=true`` into ``/etc/sysconfig/kubelet``. This file could
-   look like:
-
-   .. code-block:: bash
-
-      KUBELET_EXTRA_ARGS="--feature-gates KubeletPodResources=true"
-
-   Note that it is important to set right value for parameter
-   ``kubelet_root_dir`` in ``kuryr.conf``. By default it is
-   ``/var/lib/kubelet``.  In case of using containerized CNI it is necessary to
-   mount ``'kubelet_root_dir'/pod-resources`` directory into CNI container.
-
-   To use this feature add ``enable_pod_resource_service`` into kuryr.conf.
-
-   .. code-block:: ini
-
-      [sriov]
-      enable_pod_resource_service = True
-
-#. Use privileged user
-
-   To make neutron ports active kuryr-k8s makes requests to neutron API to
-   update ports with binding:profile information. Due to this it is necessary
-   to make actions with privileged user with admin rights.
+            openstack.org/kuryr-config: '{
+            "subnetId": "UUID of vlan-sriov-net",
+            "driverType": "sriov"
+            }'
 
 
-.. _NPWG spec: https://docs.openstack.org/kuryr-kubernetes/latest/specs/rocky/npwg_spec_support.html
-.. _sriov-device-plugin: https://docs.google.com/document/d/1D3dJeUUmta3sMzqw8JtWFoG2rvcJiWitVro9bsfUTEw
-.. _SRIOV network device plugin for Kubernetes: https://github.com/intel/sriov-network-device-plugin
+Then add k8s.v1.cni.cncf.io/networks and request/limits for SR-IOV
+into the pod's yaml.
+
+.. code-block:: yaml
+
+    kind: Pod
+    metadata:
+      name: my-pod
+      namespace: my-namespace
+      annotations:
+        k8s.v1.cni.cncf.io/networks: sriov-net1,sriov-net2
+    spec:
+      containers:
+      - name: containerName
+        image: containerImage
+        imagePullPolicy: IfNotPresent
+        command: ["tail", "-f", "/dev/null"]
+        resources:
+          requests:
+            intel.com/sriov: '2'
+          limits:
+            intel.com/sriov: '2'
+
+
+In the above example two SR-IOV devices will be attached to pod. First one is described
+in sriov-net1 NetworkAttachmentDefinition, second one in sriov-net2. They may have
+different subnetId.
+
+4. Specify resource names
+
+The resource name *intel.com/sriov*, which used in the above example is the default
+resource name. This name was used in SR-IOV network device plugin in
+version 1 (release-v1 branch). But since latest version the device plugin can use any
+arbitrary name of the resources [3]_. This name should match "^\[a-zA-Z0-9\_\]+$"
+regular expression. To be able to work with arbitrary resource names
+physnet_resource_mappings and device_plugin_resource_prefix in [sriov] section
+of kuryr-controller configuration file should be filled. The default value for
+device_plugin_resource_prefix is intel.com, the same as in SR-IOV network device plugin,
+in case of SR-IOV network device plugin was started with value of -resource-prefix option
+different from intel.com, than value should be set to
+device_plugin_resource_prefix, otherwise kuryr-kubernetes will not work with resource.
+
+Assume we have following SR-IOV network device plugin (defined by -config-file option)
+
+.. code-block:: json
+
+    {
+        "resourceList":
+            [
+               {
+                  "resourceName": "numa0",
+                  "rootDevices": ["0000:02:00.0"],
+                  "sriovMode": true,
+                  "deviceType": "netdevice"
+               }
+            ]
+    }
+
+We defined numa0 resource name, also assume we started sriovdp with
+-resource-prefix samsung.com value. The PCI address of ens4f0 interface
+is "0000:02:00.0". If we assigned 8 VF to ens4f0 and launch SR-IOV network
+device plugin, we can see following state of kubernetes
+
+.. code-block:: bash
+
+    $ kubectl get node node1 -o json | jq '.status.allocatable'
+    {
+      "cpu": "4",
+      "ephemeral-storage": "269986638772",
+      "hugepages-1Gi": "8Gi",
+      "hugepages-2Mi": "0Gi",
+      "samsung.com/numa0": "8",
+      "memory": "7880620Ki",
+      "pods": "1k"
+    }
+
+We have to add to the sriov section following mapping:
+
+.. code-block:: ini
+
+  [sriov]
+  device_plugin_resource_prefix = samsung.com
+  physnet_resource_mappings = physnet1:numa0
+
+
+6. Use privileged user
+
+To make neutron ports active kuryr-k8s makes requests to neutron API to update
+ports with binding:profile information. Due to this it is necessary to make
+actions with privileged user with admin rights.
+
+Reference
+---------
+
+.. [1] https://docs.openstack.org/kuryr-kubernetes/latest/specs/rocky/npwg_spec_support.html
+.. [2] https://docs.google.com/document/d/1D3dJeUUmta3sMzqw8JtWFoG2rvcJiWitVro9bsfUTEw
+.. [3] https://github.com/intel/sriov-network-device-plugin
