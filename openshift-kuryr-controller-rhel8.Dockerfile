@@ -15,5 +15,5 @@ LABEL \
         maintainer="Michal Dulko <mdulko@redhat.com>" \
         name="openshift/kuryr-controller" \
         io.k8s.display-name="kuryr-controller" \
-        version="4.3.0" \
+        version="4.4.0" \
         com.redhat.component="kuryr-controller-container"

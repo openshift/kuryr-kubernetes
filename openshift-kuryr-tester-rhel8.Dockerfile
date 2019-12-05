@@ -12,5 +12,5 @@ LABEL \
         maintainer="Michal Dulko <mdulko@redhat.com>" \
         name="openshift/kuryr-tester" \
         io.k8s.display-name="kuryr-tester" \
-        version="4.0.0" \
+        version="4.4.0" \
         com.redhat.component="kuryr-tester-container"
