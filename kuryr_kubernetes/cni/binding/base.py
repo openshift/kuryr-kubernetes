@@ -86,7 +86,7 @@ def _configure_l3(vif, ifname, netns, is_default_gateway):
             for route in subnet.routes.objects:
                 routes.add(gateway=str(route.gateway),
                            dst=str(route.cidr)).commit()
-            if is_default_gateway and hasattr(subnet, 'gateway'):
+            if is_default_gateway and subnet.obj_attr_is_set('gateway'):
                 routes.add(gateway=str(subnet.gateway),
                            dst='default').commit()
 
