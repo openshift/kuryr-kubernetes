@@ -44,18 +44,18 @@ def neutron_to_osvif_network(neutron_network):
     :return: an os-vif Network object
     """
 
-    obj = osv_network.Network(id=neutron_network['id'])
+    obj = osv_network.Network(id=neutron_network.id)
 
-    if neutron_network.get('name') is not None:
-        obj.label = neutron_network['name']
+    if neutron_network.name:
+        obj.label = neutron_network.name
 
-    if neutron_network.get('mtu') is not None:
-        obj.mtu = neutron_network['mtu']
+    if neutron_network.mtu is not None:
+        obj.mtu = neutron_network.mtu
 
     # Vlan information will be used later in Sriov binding driver
-    if neutron_network.get('provider:network_type') == 'vlan':
+    if neutron_network.provider_network_type == 'vlan':
         obj.should_provide_vlan = True
-        obj.vlan = neutron_network['provider:segmentation_id']
+        obj.vlan = neutron_network.provider_segmentation_id
 
     return obj
 
@@ -69,12 +69,12 @@ def neutron_to_osvif_subnet(neutron_subnet):
     """
 
     obj = osv_subnet.Subnet(
-        cidr=neutron_subnet['cidr'],
-        dns=neutron_subnet['dns_nameservers'],
-        routes=_neutron_to_osvif_routes(neutron_subnet['host_routes']))
+        cidr=neutron_subnet.cidr,
+        dns=neutron_subnet.dns_nameservers,
+        routes=_neutron_to_osvif_routes(neutron_subnet.host_routes))
 
-    if neutron_subnet.get('gateway_ip') is not None:
-        obj.gateway = neutron_subnet['gateway_ip']
+    if neutron_subnet.gateway_ip:
+        obj.gateway = neutron_subnet.gateway_ip
 
     return obj
 
@@ -87,8 +87,8 @@ def _neutron_to_osvif_routes(neutron_routes):
     :return: an os-vif RouteList object
     """
 
-    obj_list = [osv_route.Route(cidr=route['destination'],
-                                gateway=route['nexthop'])
+    obj_list = [osv_route.Route(cidr=route.destination,
+                                gateway=route.nexthop)
                 for route in neutron_routes]
 
     return osv_route.RouteList(objects=obj_list)
