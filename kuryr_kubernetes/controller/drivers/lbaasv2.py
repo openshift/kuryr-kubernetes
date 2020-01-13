@@ -55,6 +55,7 @@ _L7_POLICY_ACT_REDIRECT_TO_POOL = 'REDIRECT_TO_POOL'
 _LB_STS_POLL_FAST_INTERVAL = 1
 _LB_STS_POLL_SLOW_INTERVAL = 3
 _OCTAVIA_TAGGING_VERSION = 2, 5
+_OCTAVIA_DL_VERSION = 2, 11
 _OCTAVIA_ACL_VERSION = 2, 12
 
 
@@ -66,6 +67,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
         self._octavia_tags = False
         self._octavia_acls = False
+        self._octavia_double_listeners = False
         # Check if Octavia API supports tagging.
         # TODO(dulek): *Maybe* this can be replaced with
         #         lbaas.get_api_major_version(version=_OCTAVIA_TAGGING_VERSION)
@@ -75,6 +77,10 @@ class LBaaSv2Driver(base.LBaaSDriver):
         if v >= _OCTAVIA_ACL_VERSION:
             self._octavia_acls = True
             LOG.info('Octavia supports ACLs for Amphora provider.')
+        if v >= _OCTAVIA_DL_VERSION:
+            self._octavia_double_listeners = True
+            LOG.info('Octavia supports double listeners (different '
+                     'protocol, same port) for Amphora provider.')
         if v >= _OCTAVIA_TAGGING_VERSION:
             LOG.info('Octavia supports resource tags.')
             self._octavia_tags = True
@@ -84,6 +90,9 @@ class LBaaSv2Driver(base.LBaaSDriver):
                         'API %s does not support resource tagging. Kuryr '
                         'will put requested tags in the description field of '
                         'Octavia resources.', v_str)
+
+    def double_listeners_supported(self):
+        return self._octavia_double_listeners
 
     def get_octavia_version(self):
         lbaas = clients.get_loadbalancer_client()
