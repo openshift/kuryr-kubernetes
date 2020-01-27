@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from openstack import exceptions as os_exc
 from oslo_cache import core as cache
 from oslo_config import cfg
 from oslo_log import log
@@ -22,7 +23,6 @@ from six.moves.urllib import parse
 from kuryr_kubernetes import clients
 from kuryr_kubernetes import constants
 from kuryr_kubernetes import exceptions as k_exc
-from kuryr_kubernetes import os_vif_util as ovu
 from kuryr_kubernetes import utils
 
 from neutronclient.common import exceptions as n_exc
@@ -50,7 +50,7 @@ cache.configure_cache_region(CONF, pod_ip_cache_region)
 
 
 def get_network_id(subnets):
-    ids = ovu.osvif_to_neutron_network_ids(subnets)
+    ids = list(set(net.id for net in subnets.values()))
 
     if len(ids) != 1:
         raise k_exc.IntegrityError(
@@ -186,33 +186,36 @@ def replace_encoded_characters(labels):
 
 
 def create_security_group_rule(body):
-    neutron = clients.get_neutron_client()
+    os_net = clients.get_network_client()
+
     sgr = ''
+
     try:
-        sgr = neutron.create_security_group_rule(
-            body=body)
-    except n_exc.Conflict as ex:
+        params = dict(body['security_group_rule'])
+        if 'ethertype' in params:
+            # NOTE(gryf): in openstacksdk, there is ether_type attribute in
+            # the security_group_rule object, in CRD we have 'ethertype'
+            # instead, just like it was returned by the neutron client.
+            params['ether_type'] = params['ethertype']
+            del params['ethertype']
+        sgr = os_net.create_security_group_rule(**params)
+        return sgr.id
+    except os_exc.ConflictException as ex:
         LOG.debug("Failed to create already existing security group "
                   "rule %s", body)
         # Get existent sg rule id from exception message
-        sgr_id = str(ex).split("Rule id is", 1)[1].split()[0][:-1]
-        return sgr_id
-    except n_exc.NeutronClientException:
+        return str(ex).split()[-1][:-1]
+    except os_exc.SDKException:
         LOG.debug("Error creating security group rule")
         raise
-    return sgr["security_group_rule"]["id"]
 
 
 def delete_security_group_rule(security_group_rule_id):
-    neutron = clients.get_neutron_client()
+    os_net = clients.get_network_client()
     try:
         LOG.debug("Deleting sg rule with ID: %s", security_group_rule_id)
-        neutron.delete_security_group_rule(
-            security_group_rule=security_group_rule_id)
-    except n_exc.NotFound:
-        LOG.debug("Error deleting security group rule as it does not "
-                  "exist: %s", security_group_rule_id)
-    except n_exc.NeutronClientException:
+        os_net.delete_security_group_rule(security_group_rule_id)
+    except os_exc.SDKException:
         LOG.debug("Error deleting security group rule: %s",
                   security_group_rule_id)
         raise
@@ -550,9 +553,3 @@ def get_port_annot_pci_info(nodename, neutron_port):
         LOG.exception('Exception when reading annotations '
                       '%s and converting from json', annot_name)
     return pci_info
-
-
-def get_ports_by_attrs(**attrs):
-    neutron = clients.get_neutron_client()
-    ports = neutron.list_ports(**attrs)
-    return ports['ports']

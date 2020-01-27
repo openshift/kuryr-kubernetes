@@ -16,10 +16,11 @@ import abc
 import six
 
 from kuryr.lib import exceptions as kl_exc
-from neutronclient.common import exceptions as n_exc
+from openstack import exceptions as os_exc
 from oslo_config import cfg as oslo_cfg
 from oslo_log import log as logging
 
+from kuryr_kubernetes import clients
 from kuryr_kubernetes.controller.drivers import neutron_vif
 
 
@@ -30,7 +31,8 @@ LOG = logging.getLogger(__name__)
 class NestedPodVIFDriver(neutron_vif.NeutronPodVIFDriver):
     """Skeletal handler driver for VIFs for Nested Pods."""
 
-    def _get_parent_port_by_host_ip(self, neutron, node_fixed_ip):
+    def _get_parent_port_by_host_ip(self, node_fixed_ip):
+        os_net = clients.get_network_client()
         node_subnet_id = oslo_cfg.CONF.pod_vif_nested.worker_nodes_subnet
         if not node_subnet_id:
             raise oslo_cfg.RequiredOptError(
@@ -39,20 +41,20 @@ class NestedPodVIFDriver(neutron_vif.NeutronPodVIFDriver):
         try:
             fixed_ips = ['subnet_id=%s' % str(node_subnet_id),
                          'ip_address=%s' % str(node_fixed_ip)]
-            ports = neutron.list_ports(fixed_ips=fixed_ips)
-        except n_exc.NeutronClientException:
+            ports = os_net.ports(fixed_ips=fixed_ips)
+        except os_exc.SDKException:
             LOG.error("Parent vm port with fixed ips %s not found!",
                       fixed_ips)
             raise
 
-        if ports['ports']:
-            return ports['ports'][0]
-        else:
-            LOG.error("Neutron port for vm port with fixed ips %s"
-                      " not found!", fixed_ips)
+        try:
+            return next(ports)
+        except StopIteration:
+            LOG.error("Neutron port for vm port with fixed ips %s not found!",
+                      fixed_ips)
             raise kl_exc.NoResourceException
 
-    def _get_parent_port(self, neutron, pod):
+    def _get_parent_port(self, pod):
         try:
             # REVISIT(vikasc): Assumption is being made that hostIP is the IP
             #              of trunk interface on the node(vm).
@@ -63,4 +65,4 @@ class NestedPodVIFDriver(neutron_vif.NeutronPodVIFDriver):
 
             LOG.error("Failed to get parent vm port ip")
             raise
-        return self._get_parent_port_by_host_ip(neutron, node_fixed_ip)
+        return self._get_parent_port_by_host_ip(node_fixed_ip)
