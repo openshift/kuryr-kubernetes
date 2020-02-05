@@ -99,7 +99,8 @@ VIF_TYPE_TO_DRIVER_MAPPING = {
     'VIFBridge': 'neutron-vif',
     'VIFVlanNested': 'nested-vlan',
     'VIFMacvlanNested': 'nested-macvlan',
-    'VIFSriov': 'sriov'
+    'VIFSriov': 'sriov',
+    'VIFDPDKNested': 'nested-dpdk',
 }
 
 
@@ -676,12 +677,12 @@ class NestedVIFPool(BaseVIFPool):
 
     def _get_parent_port_id(self, vif):
         os_net = clients.get_network_client()
-        args = {}
+        tags = []
 
         if config.CONF.neutron_defaults.resource_tags:
-            args['tags'] = config.CONF.neutron_defaults.resource_tags
+            tags = config.CONF.neutron_defaults.resource_tags
 
-        trunks = os_net.get_trunks(args)
+        trunks = os_net.trunks(tags=tags)
 
         for trunk in trunks:
             for sp in trunk.sub_ports:

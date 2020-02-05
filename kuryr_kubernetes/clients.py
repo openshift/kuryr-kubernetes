@@ -58,6 +58,10 @@ def get_pod_resources_client():
     return _clients[_POD_RESOURCES_CLIENT]
 
 
+def get_compute_client():
+    return _clients[_OPENSTACKSDK].compute
+
+
 def setup_clients():
     setup_neutron_client()
     setup_kubernetes_client()
@@ -89,17 +93,6 @@ def _create_ports(self, payload):
         raise os_exc.SDKException('Error when bulk creating ports: %s',
                                   response.text)
     return (os_port.Port(**item) for item in response.json()['ports'])
-
-
-def _get_trunks(self, payload):
-    """Return trunks filtered by whatever"""
-    # TODO(gryf): Trunk object have been updated in OpenStackSDK 0.21. After
-    # we bump to this version (or higher), this method can be safely removed,
-    # and its call replaced with:
-    #   os_net.trunks(tags=[...])
-    response = self.get(os_trunk.Trunk.base_path, params=payload)
-    os_exc.raise_from_response(response)
-    return (os_trunk.Trunk(**item) for item in response.json()['trunks'])
 
 
 def _add_trunk_subports(self, trunk, subports):
@@ -152,7 +145,6 @@ def setup_openstacksdk():
         session=session,
         region_name=getattr(config.CONF.neutron, 'region_name', None))
     conn.network.create_ports = partial(_create_ports, conn.network)
-    conn.network.get_trunks = partial(_get_trunks, conn.network)
     conn.network.add_trunk_subports = partial(_add_trunk_subports,
                                               conn.network)
     conn.network.delete_trunk_subports = partial(_delete_trunk_subports,
