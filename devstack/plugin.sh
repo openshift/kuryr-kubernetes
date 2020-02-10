@@ -388,47 +388,7 @@ function configure_neutron_defaults {
         iniset "$KURYR_CONFIG" namespace_subnet pod_subnet_pool "$subnetpool_id"
         iniset "$KURYR_CONFIG" namespace_subnet pod_router "$router_id"
     fi
-    if [ "$KURYR_SG_DRIVER" == "namespace" ]; then
-        local allow_namespace_sg_id
-        local allow_default_sg_id
-        allow_namespace_sg_id=$(openstack --os-cloud devstack-admin \
-            --os-region "$REGION_NAME" \
-            security group create --project "$project_id" \
-            allow_from_namespace -f value -c id)
-        allow_default_sg_id=$(openstack --os-cloud devstack-admin \
-            --os-region "$REGION_NAME" \
-            security group create --project "$project_id" \
-            allow_from_default -f value -c id)
-
-        for prot in icmp tcp udp ;
-          do
-            openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
-              security group rule create --project "$project_id" \
-              --description "allow traffic from default namespace" \
-              --remote-group "$allow_namespace_sg_id" --ethertype IPv4 --protocol "$prot" \
-              "$allow_default_sg_id"
-
-            if [ "$prot" != "icmp" ] ; then
-              openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
-              security group rule create --project "$project_id" \
-              --description "allow traffic from namespaces at default namespace" \
-              --remote-group "$allow_default_sg_id" --ethertype IPv4 --protocol "$prot" \
-              "$allow_namespace_sg_id"
-            fi
-          done
-
-        # NOTE(ltomasbo): Some tempest test are using FIP and depends on icmp
-        # traffic being allowed to the pods. To enable these tests we permit
-        # icmp traffic from everywhere on the default namespace. Note tcp
-        # traffic will be dropped, just icmp is permitted.
-        openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
-            security group rule create --project "$project_id" \
-            --description "allow imcp traffic from everywhere to default namespace" \
-            --ethertype IPv4 --protocol icmp "$allow_namespace_sg_id"
-
-        iniset "$KURYR_CONFIG" namespace_sg sg_allow_from_namespaces "$allow_namespace_sg_id"
-        iniset "$KURYR_CONFIG" namespace_sg sg_allow_from_default "$allow_default_sg_id"
-    elif [[ "$KURYR_SG_DRIVER" == "policy" ]]; then
+    if [[ "$KURYR_SG_DRIVER" == "policy" ]]; then
         # NOTE(dulek): Using the default DevStack's SG is not enough to match
         # the NP specification. We need to open ingress to everywhere, so we
         # create allow-all group.
@@ -449,7 +409,7 @@ function configure_neutron_defaults {
     fi
     iniset "$KURYR_CONFIG" neutron_defaults pod_security_groups "$sg_ids"
 
-    if [[ "$KURYR_SG_DRIVER" == "namespace" || "$KURYR_SG_DRIVER" == "policy" ]]; then
+    if [[ "$KURYR_SG_DRIVER" == "policy" ]]; then
         # NOTE(ltomasbo): As more security groups and rules are created, there
         # is a need to increase the quota for it
          openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
@@ -915,60 +875,6 @@ function run_kuryr_daemon {
     run_process kuryr-daemon "$daemon_bin --config-file $KURYR_CONFIG" root root
 }
 
-function create_ingress_l7_router {
-
-    local lb_port_id
-    local lb_name
-    local project_id
-    local max_timeout
-    local lb_vip
-    local fake_svc_name
-    local l7_router_fip
-    local project_id
-    local lb_uuid
-
-    lb_name=${KURYR_L7_ROUTER_NAME}
-    max_timeout=1000
-    project_id=$(get_or_create_project \
-        "$KURYR_NEUTRON_DEFAULT_PROJECT" default)
-
-    create_load_balancer "$lb_name" "$KURYR_NEUTRON_DEFAULT_SERVICE_SUBNET" "$project_id"
-
-    wait_for_lb $lb_name $max_timeout
-
-    lb_port_id="$(get_loadbalancer_attribute "$lb_name" "vip_port_id")"
-
-    #allocate FIP and bind it to lb vip
-    l7_router_fip=$(openstack --os-cloud devstack-admin \
-           --os-region "$REGION_NAME" \
-           floating ip create --project "$project_id" \
-            --subnet "$KURYR_NEUTRON_DEFAULT_EXT_SVC_SUBNET" \
-             "$KURYR_NEUTRON_DEFAULT_EXT_SVC_NET" \
-            -f value -c floating_ip_address)
-
-    openstack  --os-cloud devstack-admin \
-            --os-region "$REGION_NAME" \
-            floating ip set --port "$lb_port_id" "$l7_router_fip"
-
-    lb_uuid="$(get_loadbalancer_attribute "$lb_name" "id")"
-    iniset "$KURYR_CONFIG" ingress l7_router_uuid "$lb_uuid"
-
-    #in case tempest enabled, update router's FIP in tempest.conf
-    if is_service_enabled tempest; then
-       iniset $TEMPEST_CONFIG kuryr_kubernetes ocp_router_fip "$l7_router_fip"
-    fi
-
-    if is_service_enabled octavia; then
-        echo -n "Octavia: no need to create fake k8s service for Ingress."
-    else
-        # keep fake an endpoint less k8s service to keep Kubernetes API server
-        # from allocating ingress LB vip
-        fake_svc_name='kuryr-svc-ingress'
-        echo -n "LBaaS: create fake k8s service: $fake_svc_name for Ingress."
-        lb_vip="$(get_loadbalancer_attribute "$lb_name" "vip_address")"
-        create_k8s_fake_service $fake_svc_name $lb_vip
-    fi
-}
 
 function configure_overcloud_vm_k8s_svc_sg {
     local dst_port
@@ -999,9 +905,6 @@ function update_tempest_conf_file {
     fi
     if [[ "$KURYR_K8S_CONTAINERIZED_DEPLOYMENT" == "True" ]]; then
         iniset $TEMPEST_CONFIG kuryr_kubernetes containerized True
-    fi
-    if [[ "$KURYR_SG_DRIVER" == "namespace" ]] && [[ "$KURYR_SUBNET_DRIVER" == "namespace" ]]; then
-        iniset $TEMPEST_CONFIG kuryr_kubernetes namespace_enabled True
     fi
     if [[ "$KURYR_SUBNET_DRIVER" == "namespace" ]]; then
         iniset $TEMPEST_CONFIG kuryr_kubernetes subnet_per_namespace True
@@ -1184,12 +1087,6 @@ elif [[ "$1" == "stack" && "$2" == "test-config" ]]; then
     if is_service_enabled kuryr-kubernetes; then
         if is_service_enabled octavia; then
             create_k8s_api_service
-            #create Ingress L7 router if required
-            enable_ingress=$(trueorfalse False KURYR_ENABLE_INGRESS)
-
-            if [ "$enable_ingress" == "True" ]; then
-                create_ingress_l7_router
-            fi
         fi
 
         # FIXME(dulek): This is a very late phase to start Kuryr services.
