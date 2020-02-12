@@ -43,10 +43,6 @@ function ovs_bind_for_kubelet() {
     # Need to enable Amphorae subnet access to the kubelet iface for API
     # access
     openstack port set "$port_id" --security-group service_pod_access
-    if [[ "$KURYR_SG_DRIVER" == "namespace" ]]; then
-        openstack port set "$port_id" --security-group allow_from_namespace
-        openstack port set "$port_id" --security-group allow_from_default
-    fi
 
     ifname="kubelet${port_id}"
     ifname="${ifname:0:14}"
@@ -636,6 +632,8 @@ spec:
           mountPath: /etc/kuryr
         - name: proc
           mountPath: /host_proc
+        - name: var-pci
+          mountPath: /var/pci_address
 EOF
     if [[ -n "$VAR_RUN_PATH" ]]; then
         cat >> "${output_dir}/cni_ds.yml" << EOF
@@ -669,6 +667,9 @@ EOF
         - name: proc
           hostPath:
             path: /proc
+        - name: var-pci
+          hostPath:
+            path: /var/pci_address
 EOF
     if [[ -n "$VAR_RUN_PATH" ]]; then
         cat >> "${output_dir}/cni_ds.yml" << EOF
@@ -785,16 +786,7 @@ function run_openshift_master {
 
     wait_for "etcd" "http://${SERVICE_HOST}:${ETCD_PORT}/v2/machines"
 
-    if [[ "$USE_SYSTEMD" = "True" ]]; then
-        # If systemd is being used, proceed as normal
-        run_process openshift-master "$cmd" root root
-    else
-        # If screen is being used, there is a possibility that the devstack
-        # environment is on a stable branch. Older versions of run_process have
-        # a different signature. Sudo is used as a workaround that works in
-        # both older and newer versions of devstack.
-        run_process openshift-master "sudo $cmd"
-    fi
+    run_process openshift-master "$cmd" root root
 }
 
 # make_admin_cluster_admin
@@ -866,16 +858,7 @@ function run_openshift_node {
     sudo ln -fs "${CNI_BIN_DIR}" /opt/cni/bin
 
 
-    if [[ "$USE_SYSTEMD" = "True" ]]; then
-        # If systemd is being used, proceed as normal
-        run_process openshift-node "$command" root root
-    else
-        # If screen is being used, there is a possibility that the devstack
-        # environment is on a stable branch. Older versions of run_process have
-        # a different signature. Sudo is used as a workaround that works in
-        # both older and newer versions of devstack.
-        run_process openshift-node "sudo $command"
-    fi
+    run_process openshift-node "$command" root root
 }
 
 # lb_state
@@ -1186,16 +1169,7 @@ EOF
 
     dnsmasq_binary="$(command -v dnsmasq)"
     cmd="${dnsmasq_binary} -k -C ${openshift_dnsmasq_conf_path}"
-    if [[ "$USE_SYSTEMD" = "True" ]]; then
-        # If systemd is being used, proceed as normal
-        run_process openshift-dnsmasq "$cmd" root root
-    else
-        # If screen is being used, there is a possibility that the devstack
-        # environment is on a stable branch. Older versions of run_process have
-        # a different signature. Sudo is used as a workaround that works in
-        # both older and newer versions of devstack.
-        run_process openshift-dnsmasq "sudo $cmd"
-    fi
+    run_process openshift-dnsmasq "$cmd" root root
 
     sudo cp /etc/resolv.conf /etc/resolv.conf.orig
     search_domains=$(awk '/search/ {for (i=2; i<NF; i++) printf $i " "; print $NF}' /etc/resolv.conf.orig)
@@ -1222,16 +1196,7 @@ function run_openshift_dns {
         --config=${OPENSHIFT_DATA_DIR}/node/node-config.yaml \
         --kubeconfig=${OPENSHIFT_DATA_DIR}/node/node.kubeconfig"
 
-    if [[ "$USE_SYSTEMD" = "True" ]]; then
-        # If systemd is being used, proceed as normal
-        run_process openshift-dns "$command" root root
-    else
-        # If screen is being used, there is a possibility that the devstack
-        # environment is on a stable branch. Older versions of run_process have
-        # a different signature. Sudo is used as a workaround that works in
-        # both older and newer versions of devstack.
-        run_process openshift-dns "sudo $command"
-    fi
+    run_process openshift-dns "$command" root root
 }
 
 # cleanup_kuryr_devstack_iptables
