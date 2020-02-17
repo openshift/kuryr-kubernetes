@@ -16,6 +16,7 @@
 from functools import partial
 import os
 
+from debtcollector import removals
 from kuryr.lib import utils
 from openstack import connection
 from openstack import exceptions as os_exc
@@ -38,6 +39,7 @@ def get_network_client():
     return _clients[_OPENSTACKSDK].network
 
 
+@removals.remove
 def get_neutron_client():
     return _clients[_NEUTRON_CLIENT]
 
@@ -56,6 +58,10 @@ def get_kubernetes_client():
 
 def get_pod_resources_client():
     return _clients[_POD_RESOURCES_CLIENT]
+
+
+def get_compute_client():
+    return _clients[_OPENSTACKSDK].compute
 
 
 def setup_clients():
