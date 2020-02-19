@@ -14,8 +14,10 @@
 #    under the License.
 
 from functools import partial
+import ipaddress
 import os
 
+from debtcollector import removals
 from kuryr.lib import utils
 from openstack import connection
 from openstack import exceptions as os_exc
@@ -38,6 +40,7 @@ def get_network_client():
     return _clients[_OPENSTACKSDK].network
 
 
+@removals.remove
 def get_neutron_client():
     return _clients[_NEUTRON_CLIENT]
 
@@ -58,6 +61,10 @@ def get_pod_resources_client():
     return _clients[_POD_RESOURCES_CLIENT]
 
 
+def get_compute_client():
+    return _clients[_OPENSTACKSDK].compute
+
+
 def setup_clients():
     setup_neutron_client()
     setup_kubernetes_client()
@@ -76,6 +83,9 @@ def setup_kubernetes_client():
         #              K8s Pods.
         host = os.environ['KUBERNETES_SERVICE_HOST']
         port = os.environ['KUBERNETES_SERVICE_PORT_HTTPS']
+        addr = ipaddress.ip_address(host)
+        if addr.version == 6:
+            host = '[%s]' % host
         api_root = "https://%s:%s" % (host, port)
     _clients[_KUBERNETES_CLIENT] = k8s_client.K8sClient(api_root)
 
