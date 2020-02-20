@@ -23,6 +23,8 @@
         - kuryr-kubernetes-tempest-containerized-ovn
         - kuryr-kubernetes-tempest-containerized-network-policy
         - kuryr-kubernetes-tempest-multinode-containerized
+        - kuryr-kubernetes-tempest-containerized-ipv6
+        - kuryr-kubernetes-tempest-containerized-ovn-ipv6
     gate:
       jobs:
         - kuryr-kubernetes-tempest
@@ -36,7 +38,6 @@
         - kuryr-kubernetes-tempest-containerized-openshift-serial
         - kuryr-kubernetes-tempest-ovn
         - kuryr-kubernetes-tempest-openshift
-        - kuryr-kubernetes-tempest-openshift-ingress
         - kuryr-kubernetes-tempest-openshift-multi-vif
         - kuryr-kubernetes-tempest-multinode-ha
         - kuryr-kubernetes-tempest-containerized-crio
