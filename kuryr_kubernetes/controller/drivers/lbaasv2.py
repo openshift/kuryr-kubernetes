@@ -885,7 +885,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
                       o_lis.Listener.resource_key, response.text)
             raise k_exc.ResourceNotReady(listener_id)
 
-    def _find_listener(self, listener):
+    def _find_listener(self, listener, loadbalancer):
         lbaas = clients.get_loadbalancer_client()
         response = lbaas.listeners(
             name=listener.name,
@@ -897,6 +897,10 @@ class LBaaSv2Driver(base.LBaaSDriver):
         try:
             os_listener = next(response)
             listener.id = os_listener.id
+            if os_listener.provisioning_status == 'ERROR':
+                LOG.debug("Releasing listener %s", os_listener.id)
+                self.release_listener(loadbalancer, listener)
+                return None
         except (KeyError, StopIteration):
             return None
 
@@ -918,7 +922,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
         pool.id = response.id
         return pool
 
-    def _find_pool(self, pool, by_listener=True):
+    def _find_pool(self, pool, loadbalancer, by_listener=True):
         lbaas = clients.get_loadbalancer_client()
         response = lbaas.pools(
             name=pool.name,
@@ -932,14 +936,17 @@ class LBaaSv2Driver(base.LBaaSDriver):
                          in {l['id'] for l in p.listeners}]
             else:
                 pools = [p for p in response if pool.name == p.name]
-
             pool.id = pools[0].id
+            if pools[0].provisioning_status == 'ERROR':
+                LOG.debug("Releasing pool %s", pool.id)
+                self.release_pool(loadbalancer, pool)
+                return None
         except (KeyError, IndexError):
             return None
         return pool
 
-    def _find_pool_by_name(self, pool):
-        return self._find_pool(pool, by_listener=False)
+    def _find_pool_by_name(self, pool, loadbalancer):
+        return self._find_pool(pool, loadbalancer, by_listener=False)
 
     def _create_member(self, member):
         request = {
@@ -955,7 +962,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
         member.id = response.id
         return member
 
-    def _find_member(self, member):
+    def _find_member(self, member, loadbalancer):
         lbaas = clients.get_loadbalancer_client()
         member = copy.deepcopy(member)
         response = lbaas.members(
@@ -969,12 +976,16 @@ class LBaaSv2Driver(base.LBaaSDriver):
             os_members = next(response)
             member.id = os_members.id
             member.name = os_members.name
+            if os_members.provisioning_status == 'ERROR':
+                LOG.debug("Releasing Member %s", os_members.id)
+                self.release_member(loadbalancer, member)
+                return None
         except (KeyError, StopIteration):
             return None
 
         return member
 
-    def _ensure(self, obj, create, find, update=None):
+    def _ensure(self, create, find, obj, loadbalancer, update=None):
         try:
             result = create(obj)
             LOG.debug("Created %(obj)s", {'obj': result})
@@ -986,7 +997,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
             if e.response.status_code not in OKAY_CODES:
                 raise
 
-        result = find(obj)
+        result = find(obj, loadbalancer)
         # NOTE(maysams): A conflict may happen when a member is
         # a lefover and a new pod uses the same address. Let's
         # attempt to udpate the member name if already existent.
@@ -1020,7 +1031,8 @@ class LBaaSv2Driver(base.LBaaSDriver):
                                                   interval):
             self._wait_for_provisioning(loadbalancer, remaining, interval)
             try:
-                result = self._ensure(obj, create, find, **kwargs)
+                result = self._ensure(
+                    create, find, obj, loadbalancer, **kwargs)
                 if result:
                     return result
             except requests.exceptions.HTTPError as e:
