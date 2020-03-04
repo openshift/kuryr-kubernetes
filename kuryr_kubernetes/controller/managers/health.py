@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from http import client as httplib
 import os
-from six.moves import http_client as httplib
 
 from flask import Flask
 from oslo_config import cfg
@@ -61,7 +61,7 @@ class HealthServer(object):
     def _components_ready(self):
         os_net = clients.get_network_client()
         project_id = config.CONF.neutron_defaults.project
-        quota = os_net.get_quota(project_id)
+        quota = os_net.get_quota(quota=project_id, details=True)
 
         for component in self._registry:
             if not component.is_ready(quota):
