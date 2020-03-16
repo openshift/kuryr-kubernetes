@@ -22,7 +22,7 @@ from kuryr_kubernetes import clients
 from kuryr_kubernetes import config
 
 
-def gather_network_data(os_net):
+def gather_network_data(os_net, project_id):
     print("Ports:")
     pprint(list(os_net.ports()))
     print("Networks:")
@@ -35,23 +35,32 @@ def gather_network_data(os_net):
     pprint(list(os_net.routers()))
     print("Trunks:")
     pprint(list(os_net.trunks()))
+    print("Quota:")
+    pprint(os_net.get_quota(quota=project_id, details=True))
+
+
+def gather_loadbalancer_data(lbaas, project_id):
+    print("Load Balancers:")
+    pprint(list(lbaas.load_balancers()))
+    print("Load Balancer quota:")
+    pprint(lbaas.get_quota(quota=project_id))
 
 
 def main():
     config.init(sys.argv[1:])
     clients.setup_clients()
+    project_id = config.CONF.neutron_defaults.project
 
     try:
         os_net = clients.get_network_client()
-        gather_network_data(os_net)
+        gather_network_data(os_net, project_id)
     except os_exc.SDKException as e:
         exc = str(e)
         print(f'Error when retriving network resources: {exc}')
 
     try:
         lbaas = clients.get_loadbalancer_client()
-        print("Load Balancers:")
-        pprint(list(lbaas.load_balancers()))
+        gather_loadbalancer_data(lbaas, project_id)
     except os_exc.SDKException as e:
         exc = str(e)
         print(f'Error when retriving load balancers: {exc}')
