@@ -84,16 +84,18 @@ def webhook():
         patch_str = base64.b64encode(str(patch).encode()).decode()
 
     admission_review = {
+        'apiVersion': request_info['apiVersion'],
+        'kind': request_info['kind'],
         'response': {
             'allowed': True,
             'uid': request_info['request']['uid'],
-        }
+        },
     }
 
     if patch_str:
         admission_review['response'].update({
             'patch': patch_str,
-            'patchtype': 'JSONPatch',
+            'patchType': 'JSONPatch',
         })
 
     return jsonify(admission_review)
