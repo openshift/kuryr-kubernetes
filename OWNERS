@@ -4,3 +4,6 @@ approvers:
 - luis5tb
 - MaysaMacedo
 - gryf
+
+component: "Networking"
+subcomponent: "kuryr"
