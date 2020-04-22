@@ -13,7 +13,7 @@ with OpenStack networking.
 %global commit 0000000
 
 Name:      openshift-%project
-Version:   4.4.1
+Version:   4.5.1
 Release:   1%{?dist}
 Summary:   OpenStack networking integration with OpenShift and Kubernetes
 License:   ASL 2.0
@@ -58,7 +58,6 @@ Requires:       python3-oslo-serialization >= 2.18.0
 Requires:       python3-oslo-service >= 1.24.0
 Requires:       python3-oslo-utils >= 3.33.0
 Requires:       python3-os-vif >= 1.7.0
-Requires:       python3-six >= 1.10.0
 Requires:       python3-stevedore >= 1.20.0
 Requires:       python3-cotyledon >= 1.5.0
 Requires:       python3-flask >= 0.12.3
