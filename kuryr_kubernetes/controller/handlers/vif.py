@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
+
 from openstack import exceptions as os_exc
 from oslo_config import cfg as oslo_cfg
 from oslo_log import log as logging
@@ -22,6 +24,7 @@ from kuryr_kubernetes import clients
 from kuryr_kubernetes import constants
 from kuryr_kubernetes.controller.drivers import base as drivers
 from kuryr_kubernetes.controller.drivers import utils as driver_utils
+from kuryr_kubernetes.controller.managers import prometheus_exporter as exp
 from kuryr_kubernetes import exceptions as k_exc
 from kuryr_kubernetes.handlers import k8s_base
 from kuryr_kubernetes import objects
@@ -163,6 +166,11 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                     except k_exc.K8sClientException:
                         pod_name = pod['metadata']['name']
                         raise k_exc.ResourceNotReady(pod_name)
+                    try:
+                        self._record_pod_creation_metric(pod)
+                    except Exception:
+                        LOG.debug("Failed to record metric for pod %s",
+                                  pod['metadata']['name'])
                     if self._is_network_policy_enabled():
                         crd_pod_selectors = self._drv_sg.create_sg_rules(pod)
                         if oslo_cfg.CONF.octavia_defaults.enforce_sg_rules:
@@ -283,3 +291,14 @@ class VIFHandler(k8s_base.ResourceEventHandler):
         enabled_handlers = oslo_cfg.CONF.kubernetes.enabled_handlers
         svc_sg_driver = oslo_cfg.CONF.kubernetes.service_security_groups_driver
         return ('policy' in enabled_handlers and svc_sg_driver == 'policy')
+
+    def _record_pod_creation_metric(self, pod):
+        exporter = exp.ControllerPrometheusExporter.get_instance()
+        for condition in pod['status'].get('conditions'):
+            if condition['type'] == 'PodScheduled' and condition['status']:
+                f_str = "%Y-%m-%dT%H:%M:%SZ"
+                time_obj = datetime.datetime.strptime(
+                    condition['lastTransitionTime'], f_str)
+                pod_creation_time = datetime.datetime.now() - time_obj
+                pod_creation_sec = (pod_creation_time).total_seconds()
+                exporter.record_pod_creation_metric(pod_creation_sec)

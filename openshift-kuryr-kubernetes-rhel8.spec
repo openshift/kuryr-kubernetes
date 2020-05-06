@@ -66,6 +66,7 @@ Requires:       python3-grpcio >= 1.12.0
 Requires:       python3-protobuf >= 3.6.0
 Requires:       python3-openstacksdk >= 0.17.0
 Requires:       python3-prettytable >= 0.7.2
+Requires:       python3-prometheus_client >= 0.6.0
 
 %description -n python3-%{service}
 %{common_desc}
