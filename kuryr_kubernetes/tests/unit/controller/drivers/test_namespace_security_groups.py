@@ -221,7 +221,7 @@ class TestNamespacePodSecurityGroupsDriver(test_base.TestCase):
 
         namespace = 'test'
         project_id = mock.sentinel.project_id
-        sg = {'id': mock.sentinel.sg}
+        sg = {'id': mock.sentinel.sg, 'security_group_rules': []}
         subnet_cidr = mock.sentinel.subnet_cidr
         crd_spec = {
             'subnetCIDR': subnet_cidr
