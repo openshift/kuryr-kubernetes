@@ -613,7 +613,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
         try:
             if by_listener:
                 pools = [p for p in response if pool.listener_id
-                         in {l['id'] for l in p.listeners}]
+                         in {listener['id'] for listener in p.listeners}]
             else:
                 pools = [p for p in response if pool.name == p.name]
 
@@ -790,7 +790,12 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
         endpoints_link = utils.get_endpoints_link(service)
         k8s = clients.get_kubernetes_client()
-        endpoint = k8s.get(endpoints_link)
+        try:
+            endpoint = k8s.get(endpoints_link)
+        except k_exc.K8sResourceNotFound:
+            LOG.debug("Endpoint not Found. Skipping LB SG update for"
+                      "%s as the LB resources are not present", lbaas_name)
+            return
 
         lbaas = utils.get_lbaas_state(endpoint)
         if not lbaas:
@@ -802,7 +807,8 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
         utils.set_lbaas_state(endpoint, lbaas)
 
-        lsnr_ids = {(l.protocol, l.port): l.id for l in lbaas.listeners}
+        lsnr_ids = {(listener.protocol, listener.port): listener.id
+                    for listener in lbaas.listeners}
 
         for port in svc_ports:
             port_protocol = port['protocol']
