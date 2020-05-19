@@ -34,12 +34,13 @@ namespace_sg_driver_opts = [
                       "namespaces into the default namespace.")),
     cfg.StrOpt('sg_allow_from_default',
                help=_("Default security group to allow traffic from the "
-                      "default namespaces into the other namespaces."))
+                      "default namespaces into the other namespaces.")),
+    cfg.ListOpt('global_namespaces',
+                help=_("Global_namespaces. Default: default"),
+                default=['default'])
 ]
 
 cfg.CONF.register_opts(namespace_sg_driver_opts, "namespace_sg")
-
-DEFAULT_NAMESPACE = 'default'
 
 
 def _get_net_crd(namespace):
@@ -87,7 +88,7 @@ class NamespacePodSecurityGroupsDriver(base.PodSecurityGroupsDriver):
 
     def _get_extra_sg(self, namespace):
         # Differentiates between default namespace and the rest
-        if namespace == DEFAULT_NAMESPACE:
+        if namespace in cfg.CONF.namespace_sg.global_namespaces:
             return [cfg.CONF.namespace_sg.sg_allow_from_namespaces]
         else:
             return [cfg.CONF.namespace_sg.sg_allow_from_default]
@@ -109,6 +110,14 @@ class NamespacePodSecurityGroupsDriver(base.PodSecurityGroupsDriver):
                     }
                 }).get('security_group')
             utils.tag_neutron_resources('security-groups', [sg['id']])
+            # NOTE(ltomasbo): Neutron populates every new SG with two rules
+            #                 allowing egress on IPv4 and IPv6. As namespace
+            #                 isolation does not handle egress, we remove them
+            #                 and leave egress for the default pods SG, or
+            #                 open to modifications per namespace.
+            for sgr in sg['security_group_rules']:
+                neutron.delete_security_group_rule(sgr['id'])
+
             neutron.create_security_group_rule(
                 {
                     "security_group_rule": {
@@ -176,7 +185,7 @@ class NamespaceServiceSecurityGroupsDriver(base.ServiceSecurityGroupsDriver):
 
     def _get_extra_sg(self, namespace):
         # Differentiates between default namespace and the rest
-        if namespace == DEFAULT_NAMESPACE:
+        if namespace in cfg.CONF.namespace_sg.global_namespaces:
             return [cfg.CONF.namespace_sg.sg_allow_from_default]
         else:
             return [cfg.CONF.namespace_sg.sg_allow_from_namespaces]
