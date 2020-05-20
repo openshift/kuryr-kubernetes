@@ -348,22 +348,66 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
         for sg in loadbalancer.security_groups:
             if sg != sg_id:
-                try:
-                    neutron.create_security_group_rule({
-                        'security_group_rule': {
-                            'direction': 'ingress',
-                            'port_range_min': listener.port,
-                            'port_range_max': listener.port,
-                            'protocol': listener.protocol,
-                            'security_group_id': sg_id,
-                            'remote_group_id': sg,
-                            'description': listener.name,
-                        },
-                    })
-                except n_exc.NeutronClientException as ex:
-                    if ex.status_code != requests.codes.conflict:
-                        LOG.exception('Failed when creating security group '
-                                      'rule for listener %s.', listener.name)
+                sg_rule = {'security_group_rule': {
+                    'direction': 'ingress',
+                    'port_range_min': listener.port,
+                    'port_range_max': listener.port,
+                    'protocol': listener.protocol,
+                    'security_group_id': sg_id,
+                    'description': listener.name}}
+
+                remote_ip_prefixes = []
+
+                # This svc is on the default/global namespaces, so it allows
+                # ingress from all the pods subnets
+                if sg == CONF.namespace_sg.sg_allow_from_default:
+                    try:
+                        remote_ip_prefixes.extend(self._get_pool_cidrs(
+                            CONF.namespace_subnet.pod_subnet_pool))
+                    except n_exc.NeutronClientException as ex:
+                        LOG.exception('Failed to retrieve the pool CIDRs'
+                                      ' from security group for listener %s.',
+                                      listener.name)
+                # This svc is on a namespace that should allow traffic from
+                # the default/global namespaces
+                elif sg == CONF.namespace_sg.sg_allow_from_namespaces:
+                    try:
+                        remote_ip_prefixes.extend(
+                            self._get_global_ns_ip_cidrs())
+                    except n_exc.NeutronClientException as ex:
+                        LOG.exception('Failed to retrieve the default/global '
+                                      'CIDRs from security group for listener'
+                                      ' %s.', listener.name)
+                # namespace SG
+                else:
+                    try:
+                        remote_ip_prefixes.append(
+                            self._get_remote_ip_prefix_from_sg(sg))
+                    except n_exc.NeutronClientException as ex:
+                        LOG.exception('Failed to retrieve remote_ip_prefixes '
+                                      'from security group for listener %s.',
+                                      listener.name)
+
+                if remote_ip_prefixes:
+                    for prefix in remote_ip_prefixes:
+                        sg_rule['security_group_rule']['remote_ip_prefix'] = (
+                            prefix)
+                        try:
+                            neutron.create_security_group_rule(sg_rule)
+                        except n_exc.NeutronClientException as ex:
+                            if ex.status_code != requests.codes.conflict:
+                                LOG.exception('Failed when creating security'
+                                              ' group rule for listener %s.',
+                                              listener.name)
+                else:
+                    sg_rule['security_group_rule']['remote_group_id'] = sg
+                    try:
+                        neutron.create_security_group_rule(sg_rule)
+                    except n_exc.NeutronClientException as ex:
+                        if ex.status_code != requests.codes.conflict:
+                            LOG.exception('Failed when creating security'
+                                          ' group rule for listener %s.',
+                                          listener.name)
 
         # ensure routes have access to the services
         service_subnet_cidr = utils.get_subnet_cidr(loadbalancer.subnet_id)
@@ -402,6 +446,45 @@ class LBaaSv2Driver(base.LBaaSDriver):
                 LOG.exception('Failed when creating security group rule '
                               'to enable routes for listener %s.',
                               listener.name)
+
+    def _get_remote_ip_prefix_from_sg(self, sg):
+        neutron = clients.get_neutron_client()
+        sg_rules = neutron.list_security_group_rules(
+            security_group_id=sg,
+            direction='ingress',
+            description='Kuryr Namespace SG rule')
+
+        if len(sg_rules['security_group_rules']) > 1:
+            LOG.warning("There are more than one Kuryr SG rules associated "
+                        "to the namespace. This means manual addition and "
+                        "may break the isolation and lead to side effects.")
+        # Only 1 should exits. Returning the first one
+        for sg_rule in sg_rules['security_group_rules']:
+            return sg_rule.get('remote_ip_prefix')
+        return ""
+
+    def _get_pool_cidrs(self, pool_id):
+        neutron = clients.get_neutron_client()
+        pool = neutron.show_subnetpool(pool_id)
+        prefixes = []
+        # assuming just one prefix
+        for prefix in pool['subnetpool'].get('prefixes', []):
+            prefixes.append(prefix)
+        return prefixes
+
+    def _get_global_ns_ip_cidrs(self):
+        neutron = clients.get_neutron_client()
+        sg_rules = neutron.list_security_group_rules(
+            security_group_id=CONF.namespace_sg.sg_allow_from_default,
+            direction='ingress')
+
+        remote_ip_prefixes = []
+        # For now assuming just one default rule
+        for sg_rule in sg_rules['security_group_rules']:
+            if sg_rule.get('remote_ip_prefix'):
+                remote_ip_prefixes.append(
+                    sg_rule.get('remote_ip_prefix'))
+        return remote_ip_prefixes
 
     def _ensure_security_group_rules(self, loadbalancer, listener,
                                      service_type):

@@ -106,7 +106,8 @@ class NamespacePodSecurityGroupsDriver(base.PodSecurityGroupsDriver):
                 {
                     "security_group": {
                         "name": sg_name,
-                        "project_id": project_id
+                        "project_id": project_id,
+                        "description": "Kuryr Namespace SG"
                     }
                 }).get('security_group')
             utils.tag_neutron_resources('security-groups', [sg['id']])
@@ -123,9 +124,21 @@ class NamespacePodSecurityGroupsDriver(base.PodSecurityGroupsDriver):
                     "security_group_rule": {
                         "direction": "ingress",
                         "remote_ip_prefix": crd_spec['subnetCIDR'],
-                        "security_group_id": sg['id']
+                        "security_group_id": sg['id'],
+                        "description": "Kuryr Namespace SG rule"
                     }
                 })
+            # Adding rules to the default SG group if global namespace
+            if namespace in cfg.CONF.namespace_sg.global_namespaces:
+                neutron.create_security_group_rule(
+                    {
+                        "security_group_rule": {
+                            "direction": "ingress",
+                            "remote_ip_prefix": crd_spec['subnetCIDR'],
+                            "security_group_id": (
+                                cfg.CONF.namespace_sg.sg_allow_from_default)
+                        }
+                    })
         except n_exc.NeutronClientException:
             LOG.exception("Error creating security group for the namespace "
                           "%s", namespace)
