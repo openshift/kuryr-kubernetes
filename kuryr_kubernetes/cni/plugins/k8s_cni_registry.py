@@ -99,7 +99,12 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
                 return
         except KeyError:
             pass
-        self._do_work(params, b_base.disconnect)
+
+        try:
+            self._do_work(params, b_base.disconnect)
+        except FileNotFoundError as e:
+            LOG.warning('File %s not found. Most likely network namespace is '
+                        'already gone. Ignoring.', e.filename)
         # NOTE(ndesh): We need to lock here to avoid race condition
         #              with the deletion code in the watcher to ensure that
         #              we delete the registry entry exactly once
