@@ -617,7 +617,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
         try:
             if by_listener:
                 pools = [p for p in response if pool.listener_id
-                         in {l['id'] for l in p.listeners}]
+                         in {listener['id'] for listener in p.listeners}]
             else:
                 pools = [p for p in response if pool.name == p.name]
             pool.id = pools[0].id
@@ -818,7 +818,8 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
         utils.set_lbaas_state(endpoint, lbaas)
 
-        lsnr_ids = {(l.protocol, l.port): l.id for l in lbaas.listeners}
+        lsnr_ids = {(listener.protocol, listener.port): listener.id
+                    for listener in lbaas.listeners}
 
         for port in svc_ports:
             port_protocol = port['protocol']
