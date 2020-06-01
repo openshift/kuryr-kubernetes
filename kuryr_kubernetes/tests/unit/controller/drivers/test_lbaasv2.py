@@ -426,7 +426,8 @@ class TestLBaaSv2Driver(test_base.TestCase):
             name=loadbalancer.name,
             project_id=loadbalancer.project_id,
             vip_address=str(loadbalancer.ip),
-            vip_subnet_id=loadbalancer.subnet_id)
+            vip_subnet_id=loadbalancer.subnet_id,
+            provider='haproxy')
         for attr in loadbalancer.obj_fields:
             self.assertEqual(getattr(loadbalancer, attr),
                              getattr(ret, attr))
@@ -448,7 +449,8 @@ class TestLBaaSv2Driver(test_base.TestCase):
             name=loadbalancer.name,
             project_id=loadbalancer.project_id,
             vip_address=str(loadbalancer.ip),
-            vip_subnet_id=loadbalancer.subnet_id)
+            vip_subnet_id=loadbalancer.subnet_id,
+            provider=None)
         self.assertIsNone(ret)
         m_driver.release_loadbalancer.assert_not_called()
 
@@ -471,7 +473,8 @@ class TestLBaaSv2Driver(test_base.TestCase):
             name=loadbalancer.name,
             project_id=loadbalancer.project_id,
             vip_address=str(loadbalancer.ip),
-            vip_subnet_id=loadbalancer.subnet_id)
+            vip_subnet_id=loadbalancer.subnet_id,
+            provider=None)
         self.assertIsNone(ret)
         m_driver.release_loadbalancer.assert_called_once()
 
