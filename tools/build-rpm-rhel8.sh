@@ -1,6 +1,6 @@
 #!/bin/bash -x
 
-version=4.5.1
+version=4.6.1
 source_path=_output/SOURCES
 
 mkdir -p ${source_path}
@@ -16,7 +16,7 @@ cp openshift-kuryr.tmpfs ${source_path}
 cp kuryr-cni.service ${source_path}
 
 # NOTE(dulek): We use this to get python3-pbr package in here.
-curl http://base-openstack-4-3.ocp.svc > /etc/yum.repos.d/base-openstack-4-3.repo
+curl http://base-openstack-4-6.ocp.svc > /etc/yum.repos.d/base-openstack-4-6.repo
 
 yum install -y python3-pbr python3-devel
 

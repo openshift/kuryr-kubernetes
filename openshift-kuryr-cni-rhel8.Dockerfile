@@ -26,5 +26,5 @@ LABEL \
         maintainer="Michal Dulko <mdulko@redhat.com>" \
         name="openshift/kuryr-cni" \
         io.k8s.display-name="kuryr-cni" \
-        version="4.5.0" \
+        version="4.6.0" \
         com.redhat.component="kuryr-cni-container"
