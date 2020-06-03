@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import mock
+from unittest import mock
 
 from http.server import BaseHTTPRequestHandler
 
@@ -157,8 +157,7 @@ class TestRequestHandler(test_base.TestCase):
         headers['Content-Length'] = len(body)
         trigger_exception = False
 
-        expected_resp = ('Trunk port IP(s) missing.'
-                         .format(trunk_ips, num_ports)).encode()
+        expected_resp = ('Trunk port IP(s) missing.').encode()
 
         self._do_POST_helper(method, path, headers, body, expected_resp,
                              trigger_exception, trunk_ips, num_ports)
