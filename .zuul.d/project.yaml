@@ -38,13 +38,14 @@
         - kuryr-kubernetes-tempest-containerized-openshift-serial
         - kuryr-kubernetes-tempest-ovn
         - kuryr-kubernetes-tempest-openshift
+        - kuryr-kubernetes-tempest-containerized-ovn-provider-ovn
         - kuryr-kubernetes-tempest-openshift-multi-vif
         - kuryr-kubernetes-tempest-multinode-ha
         - kuryr-kubernetes-tempest-containerized-crio
 
 - project:
     templates:
-      - openstack-python3-ussuri-jobs
+      - openstack-python3-victoria-jobs
       - openstack-lower-constraints-jobs
       - publish-openstack-docs-pti
       - release-notes-jobs-python3
