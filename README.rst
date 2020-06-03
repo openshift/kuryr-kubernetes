@@ -1,6 +1,7 @@
 ========================
 Team and repository tags
 ========================
+foo
 
 .. image:: https://governance.openstack.org/tc/badges/kuryr-kubernetes.svg
    :target: https://governance.openstack.org/tc/reference/tags/index.html
