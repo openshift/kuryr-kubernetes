@@ -13,8 +13,8 @@ with OpenStack networking.
 %global commit 0000000
 
 Name:      openshift-%project
-Version:   4.3.1
-Release:   1%{?dist}
+Version:   %{_version}
+Release:   %{_release}%{?dist}
 Summary:   OpenStack networking integration with OpenShift and Kubernetes
 License:   ASL 2.0
 URL:       http://docs.openstack.org/developer/kuryr-kubernetes/
@@ -107,6 +107,11 @@ find %{module} -name \*.py -exec sed -i '/\/usr\/bin\/env python/{d;q}' {} +
 rm -f requirements.txt
 rm -f test-requirements.txt
 rm -f doc/requirements.txt
+
+# Need to commit it to make sure no .devxyz will get added to version by pbr.
+git commit -a --amend -m "Manage requirements on our own"
+# Tagging will make sure pbr uses this as version.
+git tag -a -m "%{version}" "%{version}"
 
 # Kill egg-info in order to generate new SOURCES.txt
 rm -rf kuryr_kubernetes.egg-info
