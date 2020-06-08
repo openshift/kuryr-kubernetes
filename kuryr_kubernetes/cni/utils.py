@@ -12,11 +12,16 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+from http import client as httplib
+import time
+
 PROC_ONE_CGROUP_PATH = '/proc/1/cgroup'
 CONTAINER_RUNTIME_CGROUP_IDS = (
     'docker',  # This is set by docker/moby
     'libpod',  # This is set by podman
 )
+
+SUCCESSFUL_REQUEST_CODE = (httplib.NO_CONTENT, httplib.ACCEPTED)
 
 
 def running_under_container_runtime(proc_one_cg_path=PROC_ONE_CGROUP_PATH):
@@ -63,3 +68,19 @@ class CNIParameters(object):
     def __repr__(self):
         return repr({key: value for key, value in self.__dict__.items() if
                      key.startswith('CNI_')})
+
+
+def measure_time(command):
+    """Measures CNI ADD/DEL resquest duration"""
+    def decorator(method):
+        def wrapper(obj, *args, **kwargs):
+            start_time = time.time()
+            result = method(obj, *args, **kwargs)
+            cni_request_error = (
+                result[1] not in SUCCESSFUL_REQUEST_CODE)
+            obj._update_metrics(
+                command, cni_request_error, time.time() - start_time)
+            return result
+        wrapper.__name__ = method.__name__
+        return wrapper
+    return decorator
