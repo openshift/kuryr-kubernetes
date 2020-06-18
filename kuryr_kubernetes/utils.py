@@ -319,7 +319,7 @@ def get_endpoints_link(service):
     link_parts = svc_link.split('/')
 
     if link_parts[-2] != 'services':
-        raise exceptions.IntegrityError(_(
+        raise exceptions.IntegrityError((
             "Unsupported service link: %(link)s") % {
             'link': svc_link})
     link_parts[-2] = 'endpoints'
