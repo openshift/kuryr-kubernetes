@@ -47,26 +47,27 @@ Requires:       python3-%{project}-lib >= 0.5.0
 # NOTE(dulek): We should have pyroute2 0.5.7 here, but it's not avalable in
 # repos we have access to. Sticking with 0.5.3 should be fine as long as we
 # don't support SR-IOV stuff.
-Requires:       python3-pyroute2 >= 0.5.3
-Requires:       python3-requests >= 2.14.2
+Requires:       python3-pyroute2 >= 0.5.7
+Requires:       python3-requests >= 2.18.0
 Requires:       python3-eventlet >= 0.22.0
 Requires:       python3-oslo-cache >= 1.26.0
-Requires:       python3-oslo-config >= 2:5.2.0
+Requires:       python3-oslo-config >= 6.1.0
 Requires:       python3-oslo-log >= 3.36.0
 Requires:       python3-oslo-reports >= 1.18.0
 Requires:       python3-oslo-serialization >= 2.18.0
-Requires:       python3-oslo-service >= 1.24.0
-Requires:       python3-oslo-utils >= 3.33.0
-Requires:       python3-os-vif >= 1.7.0
+Requires:       python3-oslo-service >= 1.40.2
+Requires:       python3-oslo-utils >= 3.40.2
+Requires:       python3-os-vif >= 1.12.0
 Requires:       python3-stevedore >= 1.20.0
 Requires:       python3-cotyledon >= 1.5.0
 Requires:       python3-flask >= 0.12.3
 Requires:       python3-retrying >= 1.2.3
 Requires:       python3-grpcio >= 1.12.0
 Requires:       python3-protobuf >= 3.6.0
-Requires:       python3-openstacksdk >= 0.17.0
+Requires:       python3-openstacksdk >= 0.36.0
 Requires:       python3-prettytable >= 0.7.2
 Requires:       python3-prometheus_client >= 0.6.0
+Requires:       python3-netaddr >= 0.7.19
 
 %description -n python3-%{service}
 %{common_desc}
