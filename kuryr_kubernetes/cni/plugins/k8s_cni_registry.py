@@ -20,6 +20,7 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from kuryr_kubernetes import clients
 from kuryr_kubernetes.cni.binding import base as b_base
 from kuryr_kubernetes.cni.plugins import base as base_cni
 from kuryr_kubernetes import constants as k_const
@@ -41,6 +42,7 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
     def __init__(self, registry, healthy):
         self.healthy = healthy
         self.registry = registry
+        self.k8s = clients.get_kubernetes_client()
 
     def _get_pod_name(self, params):
         return "%(namespace)s/%(name)s" % {
@@ -48,9 +50,28 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
             'name': params.args.K8S_POD_NAME}
 
     def add(self, params):
-        vifs = self._do_work(params, b_base.connect)
-
         pod_name = self._get_pod_name(params)
+        timeout = CONF.cni_daemon.vif_annotation_timeout
+
+        # Try to confirm if pod in the registry is not stale cache. If it is,
+        # remove it.
+        with lockutils.lock(pod_name, external=True):
+            if pod_name in self.registry:
+                cached_pod = self.registry[pod_name]['pod']
+                try:
+                    pod = self.k8s.get(cached_pod['metadata']['selfLink'])
+                except Exception:
+                    LOG.exception('Error when getting pod %s', pod_name)
+                    raise exceptions.ResourceNotReady(pod_name)
+
+                if pod['metadata']['uid'] != cached_pod['metadata']['uid']:
+                    LOG.warning('Stale pod %s detected in cache. (API '
+                                'uid=%s, cached uid=%s). Removing it from '
+                                'cache.', pod_name, pod['metadata']['uid'],
+                                cached_pod['metadata']['uid'])
+                    del self.registry[pod_name]
+
+        vifs = self._do_work(params, b_base.connect, timeout)
 
         # NOTE(dulek): Saving containerid to be able to distinguish old DEL
         #              requests that we should ignore. We need a lock to
@@ -62,9 +83,6 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
             self.registry[pod_name] = d
             LOG.debug('Saved containerid = %s for pod %s',
                       params.CNI_CONTAINERID, pod_name)
-
-        # Wait for VIFs to become active.
-        timeout = CONF.cni_daemon.vif_annotation_timeout
 
         # Wait for timeout sec, 1 sec between tries, retry when even one
         # vif is not active.
@@ -94,12 +112,20 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
                 # NOTE(dulek): This is a DEL request for some older (probably
                 #              failed) ADD call. We should ignore it or we'll
                 #              unplug a running pod.
-                LOG.warning('Received DEL request for unknown ADD call. '
-                            'Ignoring.')
+                LOG.warning('Received DEL request for unknown ADD call for '
+                            'pod %s (CNI_CONTAINERID=%s). Ignoring.', pod_name,
+                            params.CNI_CONTAINERID)
                 return
         except KeyError:
             pass
-        self._do_work(params, b_base.disconnect)
+
+        # Passing arbitrary 5 seconds as timeout, as it does not make any sense
+        # to wait on CNI DEL. If pod got deleted from API - VIF info is gone.
+        # If pod got the annotation removed - it is now gone too. The number's
+        # not 0, because we need to anticipate for restarts and delay before
+        # registry is populated by watcher.
+        self._do_work(params, b_base.disconnect, 5)
+
         # NOTE(ndesh): We need to lock here to avoid race condition
         #              with the deletion code in the watcher to ensure that
         #              we delete the registry entry exactly once
@@ -124,10 +150,8 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
                 LOG.debug("Reporting CNI driver not healthy.")
                 self.healthy.value = driver_healthy
 
-    def _do_work(self, params, fn):
+    def _do_work(self, params, fn, timeout):
         pod_name = self._get_pod_name(params)
-
-        timeout = CONF.cni_daemon.vif_annotation_timeout
 
         # In case of KeyError retry for `timeout` s, wait 1 s between tries.
         @retrying.retry(stop_max_delay=timeout * 1000, wait_fixed=RETRY_DELAY,
