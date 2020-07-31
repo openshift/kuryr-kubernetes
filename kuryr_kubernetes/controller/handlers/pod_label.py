@@ -47,26 +47,35 @@ class PodLabelHandler(k8s_base.ResourceEventHandler):
         self._drv_lbaas = drivers.LBaaSDriver.get_instance()
 
     def on_present(self, pod):
-        if driver_utils.is_host_network(pod) or not self._has_pod_state(pod):
+        if driver_utils.is_host_network(pod) or not self._has_vifs(pod):
             # NOTE(ltomasbo): The event will be retried once the vif handler
             # annotates the pod with the pod state.
             return
 
-        current_pod_labels = pod['metadata'].get('labels')
-        previous_pod_labels = self._get_pod_labels(pod)
-        LOG.debug("Got previous pod labels from annotation: %r",
-                  previous_pod_labels)
-
-        if current_pod_labels == previous_pod_labels:
+        if (constants.K8S_ANNOTATION_VIF in
+                pod['metadata'].get('annotations', {})):
+            # NOTE(dulek): This might happen on upgrade, we need to wait for
+            #              annotation to be moved to KuryrPort CRD.
             return
 
+        current_pod_info = (pod['metadata'].get('labels'),
+                            pod['status'].get('podIP'))
+        previous_pod_info = self._get_pod_info(pod)
+        LOG.debug("Got previous pod info from annotation: %r",
+                  previous_pod_info)
+
+        if current_pod_info == previous_pod_info:
+            return
+
+        # FIXME(dulek): We should be able to just do create if only podIP
+        #               changed, right?
         crd_pod_selectors = self._drv_sg.update_sg_rules(pod)
 
         project_id = self._drv_project.get_project(pod)
         security_groups = self._drv_sg.get_security_groups(pod, project_id)
         self._drv_vif_pool.update_vif_sgs(pod, security_groups)
         try:
-            self._set_pod_labels(pod, current_pod_labels)
+            self._set_pod_info(pod, current_pod_info)
         except k_exc.K8sResourceNotFound:
             LOG.debug("Pod already deleted, no need to retry.")
             return
@@ -75,33 +84,37 @@ class PodLabelHandler(k8s_base.ResourceEventHandler):
             services = driver_utils.get_services()
             self._update_services(services, crd_pod_selectors, project_id)
 
-    def _get_pod_labels(self, pod):
+    def _get_pod_info(self, pod):
         try:
             annotations = pod['metadata']['annotations']
             pod_labels_annotation = annotations[constants.K8S_ANNOTATION_LABEL]
+            pod_ip_annotation = annotations[constants.K8S_ANNOTATION_IP]
         except KeyError:
-            return None
+            return None, None
         pod_labels = jsonutils.loads(pod_labels_annotation)
-        return pod_labels
+        return pod_labels, pod_ip_annotation
 
-    def _set_pod_labels(self, pod, labels):
-        if not labels:
-            LOG.debug("Removing Label annotation: %r", labels)
-            annotation = None
+    def _set_pod_info(self, pod, info):
+        if not info[0]:
+            LOG.debug("Removing info annotations: %r", info)
+            annotation = None, info[1]
         else:
-            annotation = jsonutils.dumps(labels, sort_keys=True)
-            LOG.debug("Setting Labels annotation: %r", annotation)
+            annotation = jsonutils.dumps(info[0], sort_keys=True), info[1]
+            LOG.debug("Setting info annotations: %r", annotation)
 
         k8s = clients.get_kubernetes_client()
         k8s.annotate(pod['metadata']['selfLink'],
-                     {constants.K8S_ANNOTATION_LABEL: annotation},
+                     {
+                         constants.K8S_ANNOTATION_LABEL: annotation[0],
+                         constants.K8S_ANNOTATION_IP: annotation[1]
+                     },
                      resource_version=pod['metadata']['resourceVersion'])
 
-    def _has_pod_state(self, pod):
+    def _has_vifs(self, pod):
         try:
-            pod_state = pod['metadata']['annotations'][
-                constants.K8S_ANNOTATION_VIF]
-            LOG.debug("Pod state is: %s", pod_state)
+            kp = driver_utils.get_vifs(pod)
+            vifs = kp['spec']['vifs']
+            LOG.debug("Pod have associated KuryrPort with vifs: %s", vifs)
         except KeyError:
             return False
         return True
@@ -111,6 +124,5 @@ class PodLabelHandler(k8s_base.ResourceEventHandler):
             if not driver_utils.service_matches_affected_pods(
                     service, crd_pod_selectors):
                 continue
-            sgs = self._drv_svc_sg.get_security_groups(service,
-                                                       project_id)
+            sgs = self._drv_svc_sg.get_security_groups(service, project_id)
             self._drv_lbaas.update_lbaas_sg(service, sgs)
