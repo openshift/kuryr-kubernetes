@@ -11,7 +11,11 @@ ARG OSLO_LOCK_PATH=/var/kuryr-lock
 
 COPY --from=builder /go/bin/kuryr-cni /kuryr-cni
 
-RUN dnf install -y openshift-kuryr-cni iproute openvswitch \
+# FIXME(dulek): For some reason the local repo in OKD builds is disabled,
+#               using sed to enable it. Ignoring fail as it won't work (nor
+#               it's necessary) in OCP builds.
+RUN (sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/built.repo || true) \
+ && dnf install -y openshift-kuryr-cni iproute openvswitch \
  && dnf clean all \
  && rm -rf /var/cache/yum
 

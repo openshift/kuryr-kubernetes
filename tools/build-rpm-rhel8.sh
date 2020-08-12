@@ -4,11 +4,11 @@ source_path=_output/SOURCES
 
 mkdir -p ${source_path}
 
-# Getting version from last tag in git
-version=`git describe --tags --abbrev=0`
-version=${version#openshift-kuryr-} # remove prefix
-release=${version#*-} # remove prefix
-version=${version%-*} # remove date suffix
+# Getting version from args
+version=${1:-4.6.0}
+
+# Trick to make sure we'll install this RPM later on, not the one from the repo.
+release=999999999999
 
 # NOTE(dulek): rpmbuild requires that inside the tar there will be a
 #              ${service}-${version} directory, hence this --transform option.
