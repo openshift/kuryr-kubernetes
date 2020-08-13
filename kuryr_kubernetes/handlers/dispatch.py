@@ -52,7 +52,7 @@ class Dispatcher(h_base.EventHandler):
         handlers = key_group.setdefault(key, [])
         handlers.append(handler)
 
-    def __call__(self, event):
+    def __call__(self, event, *args, **kwargs):
         handlers = set()
 
         for key_fn, key_group in self._registry.items():
@@ -68,7 +68,7 @@ class Dispatcher(h_base.EventHandler):
                   obj_meta.get('uid'))
 
         for handler in handlers:
-            handler(event)
+            handler(event, *args, **kwargs)
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -116,8 +116,8 @@ class EventPipeline(h_base.EventHandler):
         for key_fn, key in consumer.consumes.items():
             self._dispatcher.register(key_fn, key, handler)
 
-    def __call__(self, event):
-        self._handler(event)
+    def __call__(self, event, *args, **kwargs):
+        self._handler(event, *args, **kwargs)
 
     @abc.abstractmethod
     def _wrap_dispatcher(self, dispatcher):
