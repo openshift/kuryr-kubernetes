@@ -2,7 +2,11 @@ FROM ubi8
 
 ENV container=oci
 
-RUN dnf install -y openshift-kuryr-controller \
+# FIXME(dulek): For some reason the local repo in OKD builds is disabled,
+#               using sed to enable it. Ignoring fail as it won't work (nor
+#               it's necessary) in OCP builds.
+RUN (sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/built.repo || true) \
+ && dnf install -y openshift-kuryr-controller \
  && dnf clean all \
  && rm -rf /var/cache/yum
 
