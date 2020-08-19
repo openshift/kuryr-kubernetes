@@ -52,12 +52,6 @@ class PodLabelHandler(k8s_base.ResourceEventHandler):
             # annotates the pod with the pod state.
             return
 
-        if (constants.K8S_ANNOTATION_VIF in
-                pod['metadata'].get('annotations', {})):
-            # NOTE(dulek): This might happen on upgrade, we need to wait for
-            #              annotation to be moved to KuryrPort CRD.
-            return
-
         current_pod_info = (pod['metadata'].get('labels'),
                             pod['status'].get('podIP'))
         previous_pod_info = self._get_pod_info(pod)
@@ -113,7 +107,7 @@ class PodLabelHandler(k8s_base.ResourceEventHandler):
     def _has_vifs(self, pod):
         try:
             kp = driver_utils.get_vifs(pod)
-            vifs = kp['spec']['vifs']
+            vifs = kp['status']['vifs']
             LOG.debug("Pod have associated KuryrPort with vifs: %s", vifs)
         except KeyError:
             return False
