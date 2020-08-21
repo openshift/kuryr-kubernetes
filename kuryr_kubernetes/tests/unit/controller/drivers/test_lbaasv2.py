@@ -108,8 +108,9 @@ class TestLBaaSv2Driver(test_base.TestCase):
     def test_get_octavia_version(self):
         lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
         lbaas.get_all_version_data.return_value = OCTAVIA_VERSIONS
+        m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
         self.assertEqual((2, 2),
-                         d_lbaasv2.LBaaSv2Driver.get_octavia_version(None))
+                         d_lbaasv2.LBaaSv2Driver.get_octavia_version(m_driver))
 
     def test_ensure_loadbalancer(self):
         neutron = self.useFixture(k_fix.MockNeutronClient()).client
