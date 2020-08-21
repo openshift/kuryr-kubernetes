@@ -583,6 +583,62 @@ class LBaaSv2Driver(base.LBaaSDriver):
             self._create_lb_security_group_rule(loadbalancer, listener)
         if (namespace_isolation and service_type == 'ClusterIP' and
                 CONF.octavia_defaults.enforce_sg_rules):
+            if self._octavia_acls:
+                # Using the new ACL Octavia API instead of manually handling
+                # the creation of rules at the load balancer security group
+                LOG.debug("Creating the Octavia ACLs for Listener %s",
+                          listener.id)
+                allowed_subnets = []
+                sg_id = self._get_vip_port(loadbalancer).get(
+                    'security_groups')[0]
+                for sg in loadbalancer.security_groups:
+                    if sg != sg_id:
+                        # This svc is on the default/global namespaces, so it
+                        # allows ingress from all the pods subnets
+                        if sg == CONF.namespace_sg.sg_allow_from_default:
+                            try:
+                                allowed_subnets.extend(self._get_pool_cidrs(
+                                    CONF.namespace_subnet.pod_subnet_pool))
+                            except n_exc.NeutronClientException:
+                                LOG.exception('Failed to retrieve the pool '
+                                              'CIDRs for listener %s.',
+                                              listener.name)
+                        # This svc is on a namespace that should allow traffic
+                        # from the default/global namespaces
+                        elif sg == CONF.namespace_sg.sg_allow_from_namespaces:
+                            try:
+                                allowed_subnets.extend(
+                                    self._get_global_ns_ip_cidrs())
+                            except n_exc.NeutronClientException:
+                                LOG.exception('Failed to retrieve the default'
+                                              'or global CIDRs for listener'
+                                              ' %s.', listener.name)
+                        # namespace SG
+                        else:
+                            try:
+                                allowed_subnets.append(
+                                    self._get_remote_ip_prefix_from_sg(sg))
+                            except n_exc.NeutronClientException:
+                                LOG.exception('Failed to retrieve namespace '
+                                              'CIDR for listener %s.',
+                                              listener.name)
+
+                        # ensure routes have access to the services
+                        service_subnet_cidr = utils.get_subnet_cidr(
+                            loadbalancer.subnet_id)
+                        allowed_subnets.append(service_subnet_cidr)
+
+                        # ensure access from worker node VM subnet
+                        worker_subnet_id = (
+                            CONF.pod_vif_nested.worker_nodes_subnet)
+                        if worker_subnet_id:
+                            worker_subnet_cidr = utils.get_subnet_cidr(
+                                worker_subnet_id)
+                            allowed_subnets.append(worker_subnet_cidr)
+
+                self._update_listener_acls(loadbalancer, listener.id,
+                                           list(set(allowed_subnets)))
+                return
             self._extend_lb_security_group_rules(loadbalancer, listener)
 
     def ensure_listener(self, loadbalancer, protocol, port,
