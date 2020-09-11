@@ -193,6 +193,9 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
         return pool_key[2]
 
     def request_vif(self, pod, project_id, subnets, security_groups):
+        if not self._recovered_pools:
+            LOG.info("Kuryr-controller not yet ready to handle new pods.")
+            raise exceptions.ResourceNotReady(pod)
         try:
             host_addr = self._get_host_addr(pod)
         except KeyError:
@@ -255,6 +258,9 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
 
     def release_vif(self, pod, vif, project_id, security_groups,
                     host_addr=None):
+        if not self._recovered_pools:
+            LOG.info("Kuryr-controller not yet ready to remove pods.")
+            raise exceptions.ResourceNotReady(pod)
         if not host_addr:
             host_addr = self._get_host_addr(pod)
 
@@ -523,7 +529,7 @@ class NeutronVIFPool(BaseVIFPool):
 
     @lockutils.synchronized('return_to_pool_baremetal')
     def _trigger_return_to_pool(self):
-        if not hasattr(self, '_recyclable_ports'):
+        if not self._recovered_pools:
             LOG.info("Kuryr-controller not yet ready to return ports to "
                      "pools.")
             return
@@ -691,6 +697,9 @@ class NestedVIFPool(BaseVIFPool):
         return None
 
     def release_vif(self, pod, vif, project_id, security_groups):
+        if not self._recovered_pools:
+            LOG.info("Kuryr-controller not yet ready to remove pods.")
+            raise exceptions.ResourceNotReady(pod)
         try:
             host_addr = self._get_host_addr(pod)
         except KeyError:
@@ -773,7 +782,7 @@ class NestedVIFPool(BaseVIFPool):
 
     @lockutils.synchronized('return_to_pool_nested')
     def _trigger_return_to_pool(self):
-        if not hasattr(self, '_recyclable_ports'):
+        if not self._recovered_pools:
             LOG.info("Kuryr-controller not yet ready to return ports to "
                      "pools.")
             return
