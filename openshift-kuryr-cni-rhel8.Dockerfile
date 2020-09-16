@@ -11,6 +11,9 @@ ARG OSLO_LOCK_PATH=/var/kuryr-lock
 
 COPY --from=builder /go/bin/kuryr-cni /kuryr-cni
 
+COPY ./images/iptables-scripts/iptables /usr/sbin/
+COPY ./images/iptables-scripts/ip6tables /usr/sbin/
+
 # FIXME(dulek): For some reason the local repo in OKD builds is disabled,
 #               using sed to enable it. Ignoring fail as it won't work (nor
 #               it's necessary) in OCP builds.
