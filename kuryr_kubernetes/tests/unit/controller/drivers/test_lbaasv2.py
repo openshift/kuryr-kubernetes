@@ -105,9 +105,16 @@ class TestLBaaSv2Driver(test_base.TestCase):
             self.assertEqual({}, req, 'Unnecessary description added to '
                                       'resource %s' % res)
 
-    def test_get_octavia_version(self):
-        lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
-        lbaas.get_all_version_data.return_value = OCTAVIA_VERSIONS
+    @mock.patch('kuryr_kubernetes.clients.get_openstacksdk')
+    def test_get_octavia_version(self, get_os_sdk):
+        get_all_version_data = mock.Mock()
+        get_all_version_data.return_value = OCTAVIA_VERSIONS
+        session = mock.Mock()
+        session.get_all_version_data = get_all_version_data
+        os_sdk = mock.Mock()
+        os_sdk.config.get_session.return_value = session
+        get_os_sdk.return_value = os_sdk
+
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
         self.assertEqual((2, 2),
                          d_lbaasv2.LBaaSv2Driver.get_octavia_version(m_driver))

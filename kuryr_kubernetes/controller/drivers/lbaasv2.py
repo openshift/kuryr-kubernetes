@@ -95,10 +95,11 @@ class LBaaSv2Driver(base.LBaaSDriver):
         return self._octavia_double_listeners
 
     def get_octavia_version(self):
-        lbaas = clients.get_loadbalancer_client()
+        sdk = clients.get_openstacksdk()
         region_name = getattr(CONF.neutron, 'region_name', None)
 
-        regions = lbaas.get_all_version_data()
+        regions = sdk.config.get_session().get_all_version_data(
+            service_type='load-balancer')
         # If region was specified take it, otherwise just take first as default
         endpoints = regions.get(region_name, list(regions.values())[0])
         # Take the first endpoint
