@@ -132,14 +132,15 @@ class TestLBaaSv2Driver(test_base.TestCase):
         sg_ids = ['foo', 'bar']
         lb_name = 'just_a_name'
 
-        m_driver._ensure.return_value = expected_resp
+        m_driver._ensure_loadbalancer.return_value = expected_resp
         neutron.update_port = mock.Mock()
         resp = cls.ensure_loadbalancer(m_driver, lb_name, project_id,
                                        subnet_id, ip, sg_ids, 'ClusterIP')
-        m_driver._ensure.assert_called_once_with(mock.ANY,
-                                                 m_driver._create_loadbalancer,
-                                                 m_driver._find_loadbalancer)
-        req = m_driver._ensure.call_args[0][0]
+
+        m_driver._ensure_loadbalancer.assert_called_once_with(
+            mock.ANY)
+        req = m_driver._ensure_loadbalancer.call_args[0][0]
+
         self.assertEqual(lb_name, req.name)
         self.assertEqual(project_id, req.project_id)
         self.assertEqual(subnet_id, req.subnet_id)
@@ -157,7 +158,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
         # TODO(ivc): handle security groups
         sg_ids = []
 
-        m_driver._ensure.return_value = None
+        m_driver._ensure_loadbalancer.return_value = None
         self.assertRaises(k_exc.ResourceNotReady, cls.ensure_loadbalancer,
                           m_driver, name, project_id, subnet_id, ip,
                           sg_ids, 'ClusterIP')
@@ -308,6 +309,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
                                                   pool.id)
 
     def test_ensure_member(self):
+        lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
         cls = d_lbaasv2.LBaaSv2Driver
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
         expected_resp = mock.sentinel.expected_resp
@@ -330,7 +332,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
 
         m_driver._ensure_provisioned.assert_called_once_with(
             loadbalancer, mock.ANY, m_driver._create_member,
-            m_driver._find_member)
+            m_driver._find_member, update=lbaas.update_member)
         member = m_driver._ensure_provisioned.call_args[0][1]
         self.assertEqual("%s/%s:%s" % (namespace, name, port), member.name)
         self.assertEqual(pool.project_id, member.project_id)
@@ -686,18 +688,19 @@ class TestLBaaSv2Driver(test_base.TestCase):
             name='TEST_NAME', project_id='TEST_PROJECT', ip='1.2.3.4',
             port=1234, subnet_id='D3FA400A-F543-4B91-9CD3-047AF0CE42D1',
             pool_id='D4F35594-27EB-4F4C-930C-31DD40F53B77')
-        member_id = '3A70CEC0-392D-4BC1-A27C-06E63A0FD54F'
-        resp = iter([o_mem.Member(id=member_id)])
-        lbaas.members.return_value = resp
 
+        member_id = '3A70CEC0-392D-4BC1-A27C-06E63A0FD54F'
+        resp = iter([o_mem.Member(id=member_id, name='TEST_NAME')])
+        lbaas.members.return_value = resp
         ret = cls._find_member(m_driver, member)
         lbaas.members.assert_called_once_with(
             member.pool_id,
-            name=member.name,
             project_id=member.project_id,
             subnet_id=member.subnet_id,
             address=member.ip,
             protocol_port=member.port)
+        # the member dict is copied, so the id is added to the return obj
+        member.id = member_id
         for attr in member.obj_fields:
             self.assertEqual(getattr(member, attr),
                              getattr(ret, attr))
@@ -717,7 +720,6 @@ class TestLBaaSv2Driver(test_base.TestCase):
         ret = cls._find_member(m_driver, member)
         lbaas.members.assert_called_once_with(
             member.pool_id,
-            name=member.name,
             project_id=member.project_id,
             subnet_id=member.subnet_id,
             address=member.ip,
@@ -743,7 +745,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
         obj = mock.Mock()
         m_create = mock.Mock()
         m_find = mock.Mock()
-        expected_result = mock.sentinel.expected_result
+        expected_result = None
         m_create.side_effect = exception_value
         m_find.return_value = expected_result
 
