@@ -82,6 +82,13 @@ class K8sClient(object):
             else:
                 self.verify_server = ca_crt_file
 
+        self._rq_params = {
+            'cert': self.cert,
+            'verify': self.verify_server,
+            'timeout': (CONF.kubernetes.watch_connection_timeout,
+                        CONF.kubernetes.watch_read_timeout),
+        }
+
     def _raise_from_response(self, response):
         if response.status_code == requests.codes.not_found:
             raise exc.K8sResourceNotFound(response.text)
@@ -96,9 +103,7 @@ class K8sClient(object):
             header.update({'Authorization': 'Bearer %s' % self.token})
         if headers:
             header.update(headers)
-        response = self.session.get(url, cert=self.cert,
-                                    verify=self.verify_server,
-                                    headers=header)
+        response = self.session.get(url, headers=header, **self._rq_params)
         self._raise_from_response(response)
         result = response.json() if json else response.text
         return result
@@ -118,8 +123,7 @@ class K8sClient(object):
         content_type = 'application/merge-patch+json'
         url, header = self._get_url_and_header(path, content_type)
         response = self.session.patch(url, json={field: data},
-                                      headers=header, cert=self.cert,
-                                      verify=self.verify_server)
+                                      headers=header, **self._rq_params)
         self._raise_from_response(response)
         return response.json().get('status')
 
@@ -140,8 +144,7 @@ class K8sClient(object):
             'path': path, 'data': data})
 
         response = self.session.patch(url, data=jsonutils.dumps(data),
-                                      headers=header, cert=self.cert,
-                                      verify=self.verify_server)
+                                      headers=header, **self._rq_params)
         self._raise_from_response(response)
         return response.json().get('status')
 
@@ -156,8 +159,7 @@ class K8sClient(object):
                  'value': value}]
 
         response = self.session.patch(url, data=jsonutils.dumps(data),
-                                      headers=header, cert=self.cert,
-                                      verify=self.verify_server)
+                                      headers=header, **self._rq_params)
         self._raise_from_response(response)
         return response.json().get('status')
 
@@ -170,8 +172,7 @@ class K8sClient(object):
                  'path': '/metadata/annotations/{}'.format(annotation_name)}]
 
         response = self.session.patch(url, data=jsonutils.dumps(data),
-                                      headers=header, cert=self.cert,
-                                      verify=self.verify_server)
+                                      headers=header, **self._rq_params)
         self._raise_from_response(response)
         return response.json().get('status')
 
@@ -184,8 +185,7 @@ class K8sClient(object):
                  'value': annotation_name}]
 
         response = self.session.patch(url, data=jsonutils.dumps(data),
-                                      headers=header, cert=self.cert,
-                                      verify=self.verify_server)
+                                      headers=header, **self._rq_params)
         if response.ok:
             return response.json().get('status')
         raise exc.K8sClientException(response.text)
@@ -197,8 +197,8 @@ class K8sClient(object):
         if self.token:
             header.update({'Authorization': 'Bearer %s' % self.token})
 
-        response = self.session.post(url, json=body, cert=self.cert,
-                                     verify=self.verify_server, headers=header)
+        response = self.session.post(url, json=body, headers=header,
+                                     **self._rq_params)
         self._raise_from_response(response)
         return response.json()
 
@@ -209,9 +209,7 @@ class K8sClient(object):
         if self.token:
             header.update({'Authorization': 'Bearer %s' % self.token})
 
-        response = self.session.delete(url, cert=self.cert,
-                                       verify=self.verify_server,
-                                       headers=header)
+        response = self.session.delete(url, headers=header, **self._rq_params)
         self._raise_from_response(response)
         return response.json()
 
@@ -235,8 +233,7 @@ class K8sClient(object):
                 metadata['resourceVersion'] = resource_version
             data = jsonutils.dumps({"metadata": metadata}, sort_keys=True)
             response = self.session.patch(url, data=data,
-                                          headers=header, cert=self.cert,
-                                          verify=self.verify_server)
+                                          headers=header, **self._rq_params)
             if response.ok:
                 return response.json()['metadata']['annotations']
             if response.status_code == requests.codes.conflict:
@@ -268,8 +265,6 @@ class K8sClient(object):
         url = self._base_url + path
         resource_version = None
         header = {}
-        timeouts = (CONF.kubernetes.watch_connection_timeout,
-                    CONF.kubernetes.watch_read_timeout)
         if self.token:
             header.update({'Authorization': 'Bearer %s' % self.token})
 
@@ -281,9 +276,8 @@ class K8sClient(object):
                     params['resourceVersion'] = resource_version
                 with contextlib.closing(
                         self.session.get(
-                            url, params=params, stream=True, cert=self.cert,
-                            verify=self.verify_server, headers=header,
-                            timeout=timeouts)) as response:
+                            url, params=params, stream=True, headers=header,
+                            **self._rq_params)) as response:
                     if not response.ok:
                         raise exc.K8sClientException(response.text)
                     attempt = 0
