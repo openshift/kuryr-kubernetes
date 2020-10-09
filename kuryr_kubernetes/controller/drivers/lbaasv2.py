@@ -566,7 +566,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
         try:
             lbaas.update_listener(listener_id, **request)
         except os_exc.SDKException:
-            LOG.exception('Error when updating listener %s' % listener_id)
+            LOG.error('Error when updating listener %s' % listener_id)
             raise k_exc.ResourceNotReady(listener_id)
 
     def _find_listener(self, listener, loadbalancer):

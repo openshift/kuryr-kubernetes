@@ -31,6 +31,8 @@
           devstack-plugin-container: https://opendev.org/openstack/devstack-plugin-container
           kuryr-tempest-plugin: https://opendev.org/openstack/kuryr-tempest-plugin
     vars:
+      # Default swap size got shrinked to 1 GB, it's way too small for us.
+      configure_swap_size: 8192
       tempest_test_regex: '^(kuryr_tempest_plugin.tests.)'
       tox_envlist: 'all'
       devstack_localrc:
@@ -43,6 +45,8 @@
       devstack_services:
         # TODO(dmellado):Temporary workaround until proper fix
         base: false
+        # Need to disable dstat due to bug https://github.com/dstat-real/dstat/pull/162
+        dstat: false
         s-account: false
         s-container: false
         s-object: false
@@ -109,6 +113,8 @@
       devstack_services:
         # TODO(dmellado):Temporary workaround until proper fix
         base: false
+        # Need to disable dstat due to bug https://github.com/dstat-real/dstat/pull/162
+        dstat: false
         s-account: false
         s-container: false
         s-object: false
