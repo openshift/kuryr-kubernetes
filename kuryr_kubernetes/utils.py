@@ -106,6 +106,20 @@ def get_pod_unique_name(pod):
     return "%(namespace)s/%(name)s" % pod['metadata']
 
 
+def get_res_unique_name(resource):
+    """Returns a unique name for the resource.
+
+    It returns a unique name for the resource composed of its name and the
+    namespace it is created in or just name for cluster-scoped resources.
+
+    :returns: String with <namespace/>name of the resource
+    """
+    try:
+        return "%(namespace)s/%(name)s" % resource['metadata']
+    except KeyError:
+        return "%(name)s" % resource['metadata']
+
+
 def check_suitable_multi_pool_driver_opt(pool_driver, pod_driver):
     return pod_driver in VALID_MULTI_POD_POOLS_OPTS.get(pool_driver, [])
 
