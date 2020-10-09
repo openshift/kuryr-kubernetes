@@ -146,7 +146,7 @@ install -d %{buildroot}%{_localstatedir}/run/kuryr
 # Kuryr cni_ds_init
 install -d -m 755 %{buildroot}%{_libexecdir}/%{project}
 install -p -D -m 755 cni_ds_init %{buildroot}%{_libexecdir}/%{project}/
-install -p -D -m 755 etc/cni/net.d/10-kuryr.conf %{buildroot}%{_sysconfdir}/%{project}-cni/10-kuryr.conf
+install -p -D -m 755 etc/cni/net.d/10-kuryr.conflist %{buildroot}%{_sysconfdir}/%{project}-cni/10-kuryr.conflist
 
 %pre -n python3-%{service}
 getent group %{project} >/dev/null || groupadd -r %{project}
@@ -203,4 +203,4 @@ exit 0
 %{_unitdir}/kuryr-cni.service
 %dir %attr(0755, root, root) %{_libexecdir}/%{project}
 %{_libexecdir}/%{project}/cni_ds_init
-%config(noreplace) %attr(0640, root, %{project}) %{_sysconfdir}/%{project}-cni/10-kuryr.conf
+%config(noreplace) %attr(0640, root, %{project}) %{_sysconfdir}/%{project}-cni/10-kuryr.conflist
