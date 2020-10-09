@@ -56,6 +56,10 @@ class KuryrNetworkPolicyHandler(k8s_base.ResourceEventHandler):
     def _convert_old_crds(self):
         try:
             netpolicies = self.k8s.get(constants.K8S_API_CRD_KURYRNETPOLICIES)
+        except exceptions.K8sResourceNotFound:
+            LOG.debug("%s resource not found.",
+                      constants.K8S_API_CRD_KURYRNETPOLICIES)
+            return
         except exceptions.K8sClientException:
             LOG.exception("Error when fetching old KuryrNetPolicy CRDs for "
                           "conversion.")
@@ -256,7 +260,7 @@ class KuryrNetworkPolicyHandler(k8s_base.ResourceEventHandler):
         return net_crd['status']['netId']
 
     def on_finalize(self, knp):
-        LOG.debug("Finalizing KuryrNetworkPolicy %s")
+        LOG.debug("Finalizing KuryrNetworkPolicy %s", knp)
         project_id = self._drv_project.get_project(knp)
         pods_to_update = self._drv_policy.affected_pods(knp)
         crd_sg = knp['status'].get('securityGroupId')

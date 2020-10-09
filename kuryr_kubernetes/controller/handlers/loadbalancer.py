@@ -146,7 +146,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
             kubernetes.remove_finalizer(loadbalancer_crd,
                                         k_const.KURYRLB_FINALIZER)
         except k_exc.K8sClientException:
-            LOG.exception('Error removing kuryrloadbalancer CRD finalizer'
+            LOG.exception('Error removing kuryrloadbalancer CRD finalizer '
                           'for %s', loadbalancer_crd)
             raise
 
@@ -164,7 +164,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
         try:
             kubernetes.remove_finalizer(service, k_const.SERVICE_FINALIZER)
         except k_exc.K8sClientException:
-            LOG.exception('Error removing service finalizer'
+            LOG.exception('Error removing service finalizer '
                           'for %s', service["metadata"]["name"])
             raise
 
