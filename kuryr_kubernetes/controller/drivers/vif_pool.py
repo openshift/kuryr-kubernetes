@@ -102,6 +102,8 @@ VIF_TYPE_TO_DRIVER_MAPPING = {
     'VIFSriov': 'sriov'
 }
 
+NODE_PORTS_CLEAN_FREQUENCY = 600  # seconds
+
 
 class NoopVIFPool(base.VIFPoolDriver):
     """No pool VIFs for Kubernetes Pods"""
@@ -162,6 +164,7 @@ class BaseVIFPool(base.VIFPoolDriver):
         # background thread
         self._recovered_pools = False
         eventlet.spawn(self._return_ports_to_pool)
+        eventlet.spawn(self._cleanup_removed_nodes)
 
     def set_vif_driver(self, driver):
         self._drv_vif = driver
@@ -455,6 +458,117 @@ class BaseVIFPool(base.VIFPoolDriver):
                 if not port.binding_host_id:
                     os_net.delete_port(port.id)
 
+    def _cleanup_removed_nodes(self):
+        """Remove ports associated to removed nodes."""
+        previous_ports_to_remove = []
+        while True:
+            # NOTE(ltomasbo): Nodes are not expected to be removed
+            # frequently, so there is no need to execute this frequently
+            # either
+            eventlet.sleep(NODE_PORTS_CLEAN_FREQUENCY)
+            try:
+                self._trigger_removed_nodes_ports_cleanup(
+                    previous_ports_to_remove)
+            except Exception:
+                LOG.exception('Error while removing the ports associated to '
+                              'deleted nodes. It will be retried in %s '
+                              'seconds', NODE_PORTS_CLEAN_FREQUENCY)
+
+    def _trigger_removed_nodes_ports_cleanup(self, previous_ports_to_remove):
+        """Remove ports associated to removed nodes.
+
+        There are two types of ports pool, one for neutron and one for nested.
+        For the nested, the ports lost their device_owner after being detached,
+        i.e., after the node they belong to got removed. This means we cannot
+        find them unless they have been tagged.
+
+        For the neutron ones, we rely on them having the kuryr device owner
+        and not having binding information, thus ensuring they are not
+        attached to any node. However, to avoid the case where those ports
+        are being created at the same time of the cleanup process, we don't
+        delete them unless we have seen them for 2 iterations.
+        """
+        if not self._recovered_pools:
+            LOG.debug("Kuryr-controller not yet ready to perform nodes"
+                      " cleanup.")
+            return
+        os_net = clients.get_network_client()
+        tags = config.CONF.neutron_defaults.resource_tags
+        if tags:
+            subnetpool_id = config.CONF.namespace_subnet.pod_subnet_pool
+            if subnetpool_id:
+                subnets = os_net.subnets(tags=tags,
+                                         subnetpool_id=subnetpool_id)
+                subnets_ids = [s.id for s in subnets]
+            else:
+                subnets_ids = [config.CONF.neutron_defaults.pod_subnet]
+
+            # NOTE(ltomasbo): Detached subports gets their device_owner unset
+            detached_subports = os_net.ports(status='DOWN', tags=tags)
+            for subport in detached_subports:
+                # FIXME(ltomasbo): Looking for trunk:subport is only needed
+                # due to a bug in neutron that does not reset the
+                # device_owner after the port is detached from the trunk
+                if subport.device_owner not in ['', 'trunk:subport']:
+                    continue
+                if subport.id not in previous_ports_to_remove:
+                    # FIXME(ltomasbo): Until the above problem is there,
+                    # we need to add protection for recently created ports
+                    # that are still being attached
+                    previous_ports_to_remove.append(subport.id)
+                    continue
+                # check if port belonged to kuryr and it was a subport
+                # FIXME(ltomasbo): Assuming single stack
+                if len(subport.fixed_ips) != 1:
+                    # This should never happen as there is no option to create
+                    # ports without IPs in Neutron, yet we hit it. So adding
+                    # protection from it
+                    continue
+                if subport.fixed_ips[0].get('subnet_id') not in subnets_ids:
+                    continue
+                try:
+                    del self._existing_vifs[subport.id]
+                except KeyError:
+                    LOG.debug('Port %s is not in the ports list.', subport.id)
+                try:
+                    os_net.delete_port(subport.id)
+                except os_exc.SDKException:
+                    LOG.debug("Problem deleting leftover port %s. "
+                              "Skipping.", subport.id)
+                else:
+                    previous_ports_to_remove.remove(subport.id)
+
+            # normal ports, or subports not yet attached
+            existing_ports = os_net.ports(
+                device_owner=kl_const.DEVICE_OWNER,
+                status='DOWN',
+                tags=tags)
+        else:
+            # normal ports, or subports not yet attached
+            existing_ports = os_net.ports(
+                device_owner=kl_const.DEVICE_OWNER,
+                status='DOWN')
+
+        for port in existing_ports:
+            # NOTE(ltomasbo): It may be that the port got just created and it
+            # is still being attached and/or being tagged.
+            if port.id not in previous_ports_to_remove:
+                previous_ports_to_remove.append(port.id)
+                continue
+
+            if not port.binding_host_id:
+                try:
+                    del self._existing_vifs[port.id]
+                except KeyError:
+                    LOG.debug('Port %s is not in the ports list.', port.id)
+                try:
+                    os_net.delete_port(port.id)
+                except os_exc.SDKException:
+                    LOG.debug("Problem deleting leftover port %s. "
+                              "Skipping.", port.id)
+                else:
+                    previous_ports_to_remove.remove(port.id)
+
 
 class NeutronVIFPool(BaseVIFPool):
     """Manages VIFs for Bare Metal Kubernetes Pods."""
@@ -504,7 +618,14 @@ class NeutronVIFPool(BaseVIFPool):
                 oslo_cfg.CONF.vif_pool.ports_pool_min):
             eventlet.spawn(self._populate_pool, pool_key, pod, subnets,
                            security_groups)
-        return self._existing_vifs[port_id]
+        # Add protection from port_id not in existing_vifs
+        try:
+            port = self._existing_vifs[port_id]
+        except KeyError:
+            LOG.debug('Missing port on existing_vifs, this should not happen.'
+                      ' Retrying.')
+            raise exceptions.ResourceNotReady(pod)
+        return port
 
     def _return_ports_to_pool(self):
         """Recycle ports to be reused by future pods.
@@ -519,7 +640,13 @@ class NeutronVIFPool(BaseVIFPool):
         """
         while True:
             eventlet.sleep(oslo_cfg.CONF.vif_pool.ports_pool_update_frequency)
-            self._trigger_return_to_pool()
+            try:
+                self._trigger_return_to_pool()
+            except Exception:
+                LOG.exception(
+                    'Error while returning ports to pool. '
+                    'It will be retried in %s seconds',
+                    oslo_cfg.CONF.vif_pool.ports_pool_update_frequency)
 
     @lockutils.synchronized('return_to_pool_baremetal')
     def _trigger_return_to_pool(self):
@@ -754,7 +881,14 @@ class NestedVIFPool(BaseVIFPool):
                 oslo_cfg.CONF.vif_pool.ports_pool_min):
             eventlet.spawn(self._populate_pool, pool_key, pod, subnets,
                            security_groups)
-        return self._existing_vifs[port_id]
+        # Add protection from port_id not in existing_vifs
+        try:
+            port = self._existing_vifs[port_id]
+        except KeyError:
+            LOG.debug('Missing port on existing_vifs, this should not happen.'
+                      ' Retrying.')
+            raise exceptions.ResourceNotReady(pod)
+        return port
 
     def _return_ports_to_pool(self):
         """Recycle ports to be reused by future pods.
@@ -769,7 +903,13 @@ class NestedVIFPool(BaseVIFPool):
         """
         while True:
             eventlet.sleep(oslo_cfg.CONF.vif_pool.ports_pool_update_frequency)
-            self._trigger_return_to_pool()
+            try:
+                self._trigger_return_to_pool()
+            except Exception:
+                LOG.exception(
+                    'Error while returning ports to pool. '
+                    'It will be retried in %s seconds',
+                    oslo_cfg.CONF.vif_pool.ports_pool_update_frequency)
 
     @lockutils.synchronized('return_to_pool_nested')
     def _trigger_return_to_pool(self):
