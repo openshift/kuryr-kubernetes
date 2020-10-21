@@ -14,6 +14,7 @@
 
 import abc
 import errno
+import os
 import six
 
 from oslo_log import log as logging
@@ -68,29 +69,16 @@ class NestedDriver(health.HealthHandler, b_base.BaseBindingDriver):
         with b_base.get_ipdb() as h_ipdb:
             self._remove_ifaces(h_ipdb, (temp_name,))
 
-        try:
-            with b_base.get_ipdb() as h_ipdb:
-                # TODO(vikasc): evaluate whether we should have stevedore
-                #               driver for getting the link device.
-                vm_iface_name = config.CONF.binding.link_iface
+        with b_base.get_ipdb() as h_ipdb:
+            # TODO(vikasc): evaluate whether we should have stevedore
+            #               driver for getting the link device.
+            vm_iface_name = config.CONF.binding.link_iface
 
-                args = self._get_iface_create_args(vif)
-                with h_ipdb.create(ifname=temp_name,
-                                   link=h_ipdb.interfaces[vm_iface_name],
-                                   **args) as iface:
-                    iface.net_ns_fd = utils.convert_netns(netns)
-        except pyroute2.NetlinkError as e:
-            if e.code == errno.EEXIST:
-                # NOTE(dulek): This is related to bug 1854928. It's super-rare,
-                #              so aim of this piece is to gater any info useful
-                #              for determining when it happens.
-                LOG.exception('Creation of pod interface failed due to VLAN '
-                              'ID (vlan_info=%s) conflict. Probably the '
-                              'CRI had not cleaned up the network namespace '
-                              'of deleted pods. This should not be a '
-                              'permanent issue but may cause restart of '
-                              'kuryr-cni pod.', args)
-            raise
+            args = self._get_iface_create_args(vif)
+            with h_ipdb.create(ifname=temp_name,
+                               link=h_ipdb.interfaces[vm_iface_name],
+                               **args) as iface:
+                iface.net_ns_fd = utils.convert_netns(netns)
 
         with b_base.get_ipdb(netns) as c_ipdb:
             with c_ipdb.interfaces[temp_name] as iface:
@@ -119,8 +107,86 @@ class VlanDriver(NestedDriver):
     def __init__(self):
         super(VlanDriver, self).__init__()
 
+    def connect(self, vif, ifname, netns, container_id):
+        try:
+            super(VlanDriver, self).connect(vif, ifname, netns, container_id)
+        except pyroute2.NetlinkError as e:
+            if e.code == errno.EEXIST:
+                args = self._get_iface_create_args(vif)
+                LOG.warning(
+                    'Creation of pod interface failed due to VLAN ID '
+                    '(vlan_info=%s) conflict. Probably the CRI had not '
+                    'cleaned up the network namespace of deleted pods. '
+                    'Attempting to find and delete offending interface and '
+                    'retry.', args)
+                self._cleanup_conflicting_vlan(netns, args['vlan_id'])
+                super(VlanDriver, self).connect(vif, ifname, netns,
+                                                container_id)
+                return
+            raise
+
     def _get_iface_create_args(self, vif):
         return {'kind': VLAN_KIND, 'vlan_id': vif.vlan_id}
+
+    def _cleanup_conflicting_vlan(self, netns, vlan_id):
+        if vlan_id is None:
+            # Better to not attempt that, might remove way to much.
+            return
+
+        netns_paths = []
+        handled_netns = set()
+        vm_iface_name = config.CONF.binding.link_iface
+        with b_base.get_ipdb() as h_ipdb:
+            vm_iface_index = h_ipdb.interfaces[vm_iface_name].index
+
+        if netns.startswith('/proc'):
+            # Paths have /proc/<pid>/ns/net pattern, we need to iterate
+            # over /proc.
+            netns_dir = utils.convert_netns('/proc')
+            for pid in os.listdir(netns_dir):
+                if not pid.isdigit():
+                    # Ignore all the non-pid stuff in /proc
+                    continue
+                netns_paths.append(os.path.join(netns_dir, pid, 'ns/net'))
+        else:
+            # cri-o manages netns, they're in /var/run/netns/* or similar.
+            netns_dir = os.path.dirname(netns)
+            netns_paths = os.listdir(netns_dir)
+            netns_paths = [os.path.join(netns_dir, netns_path)
+                           for netns_path in netns_paths]
+
+        for netns_path in netns_paths:
+            try:
+                # NOTE(dulek): inode can be used to clearly distinguish the
+                #              netns' as `man namespaces` says:
+                #
+                # Since Linux 3.8, they appear as symbolic links.  If two
+                # processes are in the same namespace, then the device IDs and
+                # inode numbers of their /proc/[pid]/ns/xxx symbolic links will
+                # be the same; an application can check this using the
+                # stat.st_dev and stat.st_ino fields returned by stat(2).
+                netns_stat = os.stat(netns_path)
+                netns_id = (netns_stat.st_dev, netns_stat.st_ino)
+            except OSError:
+                continue
+            if netns_id in handled_netns:
+                continue
+            handled_netns.add(netns_id)
+
+            try:
+                with b_base.get_ipdb(netns_path) as c_ipdb:
+                    for ifname, iface in c_ipdb.interfaces.items():
+                        if (iface.vlan_id == vlan_id
+                                and iface.link == vm_iface_index):
+                            LOG.warning(
+                                'Found offending interface %s with VLAN ID %d '
+                                'in netns %s. Trying to remove it.', ifname,
+                                vlan_id, netns_path)
+                            with c_ipdb.interfaces[ifname] as found_iface:
+                                found_iface.remove()
+                            break
+            except OSError:
+                continue
 
 
 class MacvlanDriver(NestedDriver):
