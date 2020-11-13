@@ -4,7 +4,7 @@ WORKDIR /go/src/github.com/openshift/kuryr-kubernetes
 COPY . .
 RUN go build -o /go/bin/kuryr-cni ./kuryr_cni
 
-FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.7
 
 ENV container=oci
 ARG OSLO_LOCK_PATH=/var/kuryr-lock
