@@ -1,4 +1,4 @@
-FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.7
 
 ENV container=oci
 
