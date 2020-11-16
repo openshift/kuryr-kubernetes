@@ -238,10 +238,12 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
         # NOTE(ltomasbo): we must wait until service handler has annotated the
         # endpoints to process them. Thus, if annotations are not updated to
         # match the endpoints information, we should skip the event
+        lbaas_state = utils.get_lbaas_state(endpoints)
         return not(lbaas_spec and
-                   self._has_pods(endpoints) and
-                   self._svc_handler_annotations_updated(endpoints,
-                                                         lbaas_spec))
+                   ((self._has_pods(endpoints) and
+                     self._svc_handler_annotations_updated(endpoints,
+                                                           lbaas_spec)) or
+                    (not self._has_pods(endpoints) and lbaas_state)))
 
     def _svc_handler_annotations_updated(self, endpoints, lbaas_spec):
         svc_link = self._get_service_link(endpoints)
@@ -267,9 +269,7 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
     def _sync_lbaas_members(self, endpoints, lbaas_state, lbaas_spec):
         changed = False
 
-        if (self._has_pods(endpoints) and
-                self._remove_unused_members(endpoints, lbaas_state,
-                                            lbaas_spec)):
+        if (self._remove_unused_members(endpoints, lbaas_state, lbaas_spec)):
             changed = True
 
         if self._sync_lbaas_pools(endpoints, lbaas_state, lbaas_spec):
@@ -430,12 +430,14 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
             if port:
                 spec_ports[port.name] = pool.id
 
-        current_targets = {(a['ip'], p['port'],
-                            spec_ports.get(p.get('name')))
-                           for s in endpoints['subsets']
-                           for a in s['addresses']
-                           for p in s['ports']
-                           if p.get('name') in spec_ports}
+        current_targets = set()
+        if endpoints.get('subsets'):
+            current_targets = {(a['ip'], p['port'],
+                                spec_ports.get(p.get('name')))
+                               for s in endpoints['subsets']
+                               for a in s['addresses']
+                               for p in s['ports']
+                               if p.get('name') in spec_ports}
 
         removed_ids = set()
         for member in lbaas_state.members:
