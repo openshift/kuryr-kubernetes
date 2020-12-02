@@ -849,7 +849,7 @@ spec:
     spec:
       containers:
       - name: coredns
-        image: coredns/coredns:1.5.0
+        image: quay.io/kuryr/coredns:1.5.0
         imagePullPolicy: Always
         args: [ "-conf", "/etc/coredns/Corefile" ]
         volumeMounts:
@@ -960,6 +960,7 @@ function update_tempest_conf_file {
     iniset $TEMPEST_CONFIG kuryr_kubernetes validate_crd True
     iniset $TEMPEST_CONFIG kuryr_kubernetes kuryrports True
     iniset $TEMPEST_CONFIG kuryr_kubernetes kuryrloadbalancers True
+    iniset $TEMPEST_CONFIG kuryr_kubernetes test_services_without_selector True
 }
 
 source $DEST/kuryr-kubernetes/devstack/lib/kuryr_kubernetes
