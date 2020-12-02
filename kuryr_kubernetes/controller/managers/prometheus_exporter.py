@@ -103,13 +103,13 @@ class ControllerPrometheusExporter(object):
                 total_num_addresses += netaddr.IPRange(
                     netaddr.IPAddress(allocation['start']),
                     netaddr.IPAddress(allocation['end'])).size
-                ports_count = len(list(self._os_net.ports(
-                    network_id=subnet.network_id,
-                    project_id=self._project_id)))
-            # NOTE(maysams): As the allocation pools range does not take
-            # into account the Gateway IP, that port IP shouldn't
-            # also be include when counting the used ports.
-            ports_count = ports_count - 1
+            # NOTE(maysams): Only takes into consideration ports created
+            # by Kuryr and excludes ports for dhcp or router.
+            tags = config.CONF.neutron_defaults.resource_tags
+            attributes = {'network_id': subnet.network_id,
+                          'project_id': self._project_id,
+                          'tags': tags}
+            ports_count = len(list(self._os_net.ports(**attributes)))
             labels = {'subnet_id': subnet.id, 'subnet_name': subnet.name}
             ports_availability = total_num_addresses-ports_count
             self.port_quota_per_subnet.labels(**labels).set(ports_availability)
