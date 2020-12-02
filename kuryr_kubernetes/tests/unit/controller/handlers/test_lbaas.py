@@ -589,9 +589,12 @@ class TestLoadBalancerHandler(test_base.TestCase):
         m_handler._drv_service_pub_ip.release_pub_ip.assert_called_once_with(
             lbaas_state.service_pub_ip_info)
 
-    def test_should_ignore(self):
+    @mock.patch('kuryr_kubernetes.utils.get_lbaas_state')
+    def test_should_ignore(self, m_get_lbaas_state):
         endpoints = mock.sentinel.endpoints
         lbaas_spec = mock.sentinel.lbaas_spec
+        lbaas_state = mock.sentinel.lbaas_state
+        m_get_lbaas_state.return_value = lbaas_state
 
         # REVISIT(ivc): ddt?
         m_handler = mock.Mock(spec=h_lbaas.LoadBalancerHandler)
@@ -602,9 +605,27 @@ class TestLoadBalancerHandler(test_base.TestCase):
             m_handler, endpoints, lbaas_spec)
         self.assertEqual(False, ret)
 
-        m_handler._has_pods.assert_called_once_with(endpoints)
+        m_handler._has_pods.assert_called()
         m_handler._svc_handler_annotations_updated.assert_called_once_with(
             endpoints, lbaas_spec)
+
+    @mock.patch('kuryr_kubernetes.utils.get_lbaas_state')
+    def test_should_ignore_member_scale_to_0(self, m_get_lbaas_state):
+        endpoints = mock.sentinel.endpoints
+        lbaas_spec = mock.sentinel.lbaas_spec
+        lbaas_state = mock.sentinel.lbaas_state
+        m_get_lbaas_state.return_value = lbaas_state
+
+        # REVISIT(ivc): ddt?
+        m_handler = mock.Mock(spec=h_lbaas.LoadBalancerHandler)
+        m_handler._has_pods.return_value = False
+        m_handler._svc_handler_annotations_updated.return_value = False
+
+        ret = h_lbaas.LoadBalancerHandler._should_ignore(
+            m_handler, endpoints, lbaas_spec)
+        self.assertEqual(False, ret)
+
+        m_handler._has_pods.assert_called()
 
     def test_has_pods(self):
         # REVISIT(ivc): ddt?
