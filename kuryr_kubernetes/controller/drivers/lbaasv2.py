@@ -778,6 +778,17 @@ class LBaaSv2Driver(base.LBaaSDriver):
         response_dict = response.json()[resource.resource_key]
         return resource(**response_dict)
 
+    def get_loadbalancers(self, request):
+        lbaas = clients.get_loadbalancer_client()
+        resource = o_lb.LoadBalancer
+        response = lbaas.get(resource.base_path, params=request)
+        if not response.ok:
+            LOG.error('Error when retrieving %s: %s', resource.resources_key,
+                      response.text)
+            response.raise_for_status()
+        response = response.json()[resource.resources_key]
+        return response
+
     def _create_loadbalancer(self, loadbalancer):
         request = {
             'name': loadbalancer.name,

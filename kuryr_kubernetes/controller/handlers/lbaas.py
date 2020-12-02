@@ -633,7 +633,6 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
         return changed
 
     def _cleanup_leftover_lbaas(self):
-        lbaas_client = clients.get_loadbalancer_client()
         services = []
         try:
             services = driver_utils.get_services().get('items')
@@ -646,11 +645,11 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
                                   if service['spec'].get('clusterIP'))
         lbaas_spec = {}
         self._drv_lbaas.add_tags('loadbalancer', lbaas_spec)
-        loadbalancers = lbaas_client.load_balancers(**lbaas_spec)
+        loadbalancers = self._drv_lbaas.get_loadbalancers(lbaas_spec)
         for loadbalancer in loadbalancers:
+            loadbalancer = obj_lbaas.LBaaSLoadBalancer(**loadbalancer)
             if loadbalancer.vip_address not in services_cluster_ip:
-                lb_obj = obj_lbaas.LBaaSLoadBalancer(**loadbalancer)
-                eventlet.spawn(self._ensure_release_lbaas, lb_obj)
+                eventlet.spawn(self._ensure_release_lbaas, loadbalancer)
 
     def _ensure_release_lbaas(self, lb_obj):
         attempts = 0
