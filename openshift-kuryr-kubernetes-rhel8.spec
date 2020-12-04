@@ -47,7 +47,7 @@ Requires:       python3-%{project}-lib >= 0.5.0
 # NOTE(dulek): We should have pyroute2 0.5.7 here, but it's not avalable in
 # repos we have access to. Sticking with 0.5.6 should be fine as long as we
 # don't support SR-IOV stuff.
-Requires:       python3-pyroute2 >= 0.5.6
+Requires:       python3-pyroute2 >= 0.5.7
 Requires:       python3-requests >= 2.18.0
 Requires:       python3-eventlet >= 0.22.0
 Requires:       python3-oslo-cache >= 1.26.0
