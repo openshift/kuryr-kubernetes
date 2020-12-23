@@ -164,8 +164,10 @@ class TestUtils(test_base.TestCase):
             kubernetes.get.assert_called_once()
 
     def test_get_endpoints_link(self):
-        service = {'metadata': {
-            'selfLink': "/api/v1/namespaces/default/services/test"}}
+        service = {'apiVersion': 'v1',
+                   'kind': 'Service',
+                   'metadata': {'namespace': 'default',
+                                'name': 'test'}}
         ret = utils.get_endpoints_link(service)
         expected_link = "/api/v1/namespaces/default/endpoints/test"
         self.assertEqual(expected_link, ret)
@@ -185,8 +187,11 @@ class TestUtils(test_base.TestCase):
     @mock.patch('kuryr_kubernetes.utils.get_service_ports')
     def test_has_port_changes(self, m_get_service_ports):
         service = {
+            'apiVersion': 'v1',
+            'kind': 'Service',
             'metadata': {
-                'selfLink': ""
+                'name': 'serv-1',
+                'namespace': 'ns1'
             },
             'spec': {
                 'ports': [
@@ -217,8 +222,11 @@ class TestUtils(test_base.TestCase):
     @mock.patch('kuryr_kubernetes.utils.get_service_ports')
     def test_has_port_changes_more_ports(self, m_get_service_ports):
         service = {
+            'apiVersion': 'v1',
+            'kind': 'Service',
             'metadata': {
-                'selfLink': ""
+                'name': 'serv-1',
+                'namespace': 'ns1'
             },
             'spec': {
                 'ports': [
@@ -257,8 +265,11 @@ class TestUtils(test_base.TestCase):
     def test_has_port_changes_no_changes(self, m_get_service_ports):
 
         service = {
+            'apiVersion': 'v1',
+            'kind': 'Service',
             'metadata': {
-                'selfLink': ""
+                'name': 'serv-1',
+                'namespace': 'ns1'
             },
             'spec': {
                 'ports': [
