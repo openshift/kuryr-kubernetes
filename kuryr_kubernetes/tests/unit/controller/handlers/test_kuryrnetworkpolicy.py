@@ -45,7 +45,6 @@ class TestPolicyHandler(test_base.TestCase):
                 'creationTimestamp': '2018-09-18T14:09:51Z',
                 'namespace': 'default',
                 'annotations': {},
-                'selfLink': self._policy_link,
                 'uid': self._policy_uid
             },
             'spec': {
@@ -98,10 +97,14 @@ class TestPolicyHandler(test_base.TestCase):
         self.assertEqual(self.lbaas_driver, self.handler._drv_lbaas)
 
     def test_convert(self):
+        self_link = ('/apis/openstack.org/v1/namespaces/ns/'
+                     'kuryrnetpolicies/old-knp')
         self.k8s.get.return_value = {'items': [{
+                'apiVersion': 'openstack.org/v1',
+                'kind': 'KuryrNetPolicy',
                 'metadata': {
-                    'selfLink': mock.sentinel.old_self_link,
                     'namespace': 'ns',
+                    'name': 'old-knp'
                 }
             }]}
         self.np_driver.get_from_old_crd.return_value = mock.sentinel.new_crd
@@ -109,4 +112,4 @@ class TestPolicyHandler(test_base.TestCase):
         self.handler._convert_old_crds()
 
         self.k8s.post.assert_called_once_with(mock.ANY, mock.sentinel.new_crd)
-        self.k8s.delete.assert_called_once_with(mock.sentinel.old_self_link)
+        self.k8s.delete.assert_called_once_with(self_link)

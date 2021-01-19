@@ -64,10 +64,10 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
                     LOG.debug('Namespace associated is not annotated: %s', ns)
                 else:
                     LOG.debug('Removing annotation: %', ns_net_annotations)
-                    k8s.remove_annotations(ns['metadata']['selfLink'],
+                    k8s.remove_annotations(utils.get_res_link(ns),
                                            constants.K8S_ANNOTATION_NET_CRD)
             try:
-                k8s.delete(net_crd['metadata']['selfLink'])
+                k8s.delete(utils.get_res_link(net_crd))
             except exceptions.K8sResourceNotFound:
                 LOG.debug('Kuryrnet object already deleted: %s', net_crd)
 
@@ -97,7 +97,7 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
         kubernetes = clients.get_kubernetes_client()
         LOG.debug('Patching KuryrNetwork CRD %s', kns_crd)
         try:
-            kubernetes.patch_crd('spec', kns_crd['metadata']['selfLink'],
+            kubernetes.patch_crd('spec', utils.get_res_link(kns_crd),
                                  {'nsLabels': ns_labels})
         except exceptions.K8sResourceNotFound:
             LOG.debug('KuryrNetwork CRD not found %s', kns_crd)

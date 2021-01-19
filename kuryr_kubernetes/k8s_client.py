@@ -115,7 +115,42 @@ class K8sClient(object):
         url = self._base_url + path
         response = self.session.get(url, headers=headers)
         self._raise_from_response(response)
-        result = response.json() if json else response.text
+
+        if json:
+            result = response.json()
+            kind = result['kind']
+
+            api_version = result.get('apiVersion')
+            if not api_version:
+                api_version = utils.get_api_ver(path)
+
+            # Strip List from e.g. PodList. For some reason `.items` of a list
+            # returned from API doesn't have `kind` set.
+            # NOTE(gryf): Also, for the sake of calculating selfLink
+            # equivalent, we need to have both: kind and apiVersion, while the
+            # latter is not present on items list for core resources, while
+            # for custom resources there are both kind and apiVersion..
+            if kind.endswith('List'):
+                kind = kind[:-4]
+
+                # NOTE(gryf): In case we get null/None for items from the API,
+                # we need to convert it to the empty list, otherwise it might
+                # be propagated to the consumers of this method and sent back
+                # to the Kubernetes as is, and fail as a result.
+                if result['items'] is None:
+                    result['items'] = []
+
+                for item in result['items']:
+                    if not item.get('kind'):
+                        item['kind'] = kind
+                    if not item.get('apiVersion'):
+                        item['apiVersion'] = api_version
+
+                if not result.get('apiVersion'):
+                    result['apiVersion'] = api_version
+        else:
+            result = response.text
+
         return result
 
     def _get_url_and_header(self, path, content_type):
@@ -231,7 +266,7 @@ class K8sClient(object):
         if finalizer in obj['metadata'].get('finalizers', []):
             return True
 
-        path = obj['metadata']['selfLink']
+        path = utils.get_res_link(obj)
         LOG.debug(f"Add finalizer {finalizer} to {path}")
         url, headers = self._get_url_and_header(
             path, 'application/merge-patch+json')
@@ -271,7 +306,7 @@ class K8sClient(object):
         self._raise_from_response(response)
 
     def remove_finalizer(self, obj, finalizer):
-        path = obj['metadata']['selfLink']
+        path = utils.get_res_link(obj)
         LOG.debug(f"Remove finalizer {finalizer} from {path}")
         url, headers = self._get_url_and_header(
             path, 'application/merge-patch+json')

@@ -111,7 +111,7 @@ class TestK8sClient(test_base.TestCase):
     @mock.patch('requests.sessions.Session.get')
     def test_get(self, m_get):
         path = '/test'
-        ret = {'test': 'value'}
+        ret = {'kind': 'Pod', 'apiVersion': 'v1'}
 
         m_resp = mock.MagicMock()
         m_resp.ok = True
@@ -119,6 +119,30 @@ class TestK8sClient(test_base.TestCase):
         m_get.return_value = m_resp
 
         self.assertEqual(ret, self.client.get(path))
+        m_get.assert_called_once_with(self.base_url + path, headers=None)
+
+    @mock.patch('requests.sessions.Session.get')
+    def test_get_list(self, m_get):
+        path = '/test'
+        ret = {'kind': 'PodList',
+               'apiVersion': 'v1',
+               'items': [{'metadata': {'name': 'pod1'},
+                          'spec': {},
+                          'status': {}}]}
+        res = {'kind': 'PodList',
+               'apiVersion': 'v1',
+               'items': [{'metadata': {'name': 'pod1'},
+                          'spec': {},
+                          'status': {},
+                          'kind': 'Pod',
+                          'apiVersion': 'v1'}]}
+
+        m_resp = mock.MagicMock()
+        m_resp.ok = True
+        m_resp.json.return_value = ret
+        m_get.return_value = m_resp
+
+        self.assertDictEqual(res, self.client.get(path))
         m_get.assert_called_once_with(self.base_url + path, headers=None)
 
     @mock.patch('requests.sessions.Session.get')
@@ -130,6 +154,27 @@ class TestK8sClient(test_base.TestCase):
         m_get.return_value = m_resp
 
         self.assertRaises(exc.K8sClientException, self.client.get, path)
+
+    @mock.patch('requests.sessions.Session.get')
+    def test_get_null_on_items_list(self, m_get):
+        path = '/test'
+
+        req = {'kind': 'PodList',
+               'apiVersion': 'v1',
+               'metadata': {},
+               'items': None}
+
+        ret = {'kind': 'PodList',
+               'apiVersion': 'v1',
+               'metadata': {},
+               'items': []}
+
+        m_resp = mock.MagicMock()
+        m_resp.ok = True
+        m_resp.json.return_value = req
+        m_get.return_value = m_resp
+
+        self.assertEqual(self.client.get(path), ret)
 
     @mock.patch('itertools.count')
     @mock.patch('requests.sessions.Session.patch')

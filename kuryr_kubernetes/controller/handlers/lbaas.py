@@ -133,7 +133,7 @@ class ServiceHandler(k8s_base.ResourceEventHandler):
         if len(subnet_ids) != 1:
             raise k_exc.IntegrityError(_(
                 "Found %(num)s subnets for service %(link)s IP %(ip)s") % {
-                    'link': service['metadata']['selfLink'],
+                    'link': utils.get_res_link(service),
                     'ip': ip,
                     'num': len(subnet_ids)})
 
@@ -174,8 +174,8 @@ class ServiceHandler(k8s_base.ResourceEventHandler):
         spec = self._build_kuryrloadbalancer_spec(service)
         LOG.debug('Patching KuryrLoadBalancer CRD %s', loadbalancer_crd)
         try:
-            kubernetes.patch_crd('spec', loadbalancer_crd['metadata'][
-                'selfLink'], spec)
+            kubernetes.patch_crd('spec', utils.get_res_link(loadbalancer_crd),
+                                 spec)
         except k_exc.K8sResourceNotFound:
             LOG.debug('KuryrLoadBalancer CRD not found %s', loadbalancer_crd)
         except k_exc.K8sConflict:
@@ -214,7 +214,7 @@ class ServiceHandler(k8s_base.ResourceEventHandler):
                 utils.has_port_changes(service, loadbalancer_crd))
 
     def _has_ip_changes(self, service, loadbalancer_crd):
-        link = service['metadata']['selfLink']
+        link = utils.get_res_link(service)
         svc_ip = self._get_service_ip(service)
 
         if loadbalancer_crd['spec'].get('ip') is None:
@@ -374,7 +374,7 @@ class EndpointsHandler(k8s_base.ResourceEventHandler):
         try:
             kubernetes.patch_crd(
                 'spec',
-                loadbalancer_crd['metadata']['selfLink'],
+                utils.get_res_link(loadbalancer_crd),
                 spec)
         except k_exc.K8sResourceNotFound:
             LOG.debug('KuryrLoadbalancer CRD not found %s', loadbalancer_crd)
@@ -437,13 +437,13 @@ class EndpointsHandler(k8s_base.ResourceEventHandler):
             k8s = clients.get_kubernetes_client()
             service_link = utils.get_service_link(endpoints)
             to_remove = [
-                (endpoints['metadata']['selfLink'],
+                (utils.get_res_link(endpoints),
                  k_const.K8S_ANNOTATION_LBAAS_SPEC),
                 (service_link,
                  k_const.K8S_ANNOTATION_LBAAS_SPEC),
             ]
             if state:
-                to_remove.append((endpoints['metadata']['selfLink'],
+                to_remove.append((utils.get_res_link(endpoints),
                                   k_const.K8S_ANNOTATION_LBAAS_STATE))
 
             for path, name in to_remove:
