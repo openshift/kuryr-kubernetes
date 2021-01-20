@@ -21,12 +21,14 @@ from kuryr_kubernetes.cni.plugins import k8s_cni_registry
 from kuryr_kubernetes import exceptions
 from kuryr_kubernetes.tests import base
 from kuryr_kubernetes.tests import fake
+from kuryr_kubernetes.tests.unit import kuryr_fixtures
 
 
 class TestDaemonServer(base.TestCase):
     def setUp(self):
         super(TestDaemonServer, self).setUp()
         healthy = mock.Mock()
+        self.k8s_mock = self.useFixture(kuryr_fixtures.MockK8sClient())
         self.plugin = k8s_cni_registry.K8sCNIRegistryPlugin({}, healthy)
         self.health_registry = mock.Mock()
         self.srv = service.DaemonServer(self.plugin, self.health_registry)
@@ -101,3 +103,34 @@ class TestDaemonServer(base.TestCase):
 
         m_delete.assert_called_once_with(mock.ANY)
         self.assertEqual(500, resp.status_code)
+
+
+class TestCNIDaemonWatcherService(base.TestCase):
+    def setUp(self):
+        super(TestCNIDaemonWatcherService, self).setUp()
+        self.registry = {}
+        self.pod = {'metadata': {'namespace': 'testing',
+                                 'name': 'default'},
+                    'vif_unplugged': False,
+                    'del_receieved': False}
+        self.healthy = mock.Mock()
+        self.watcher = service.CNIDaemonWatcherService(
+            0, self.registry, self.healthy)
+
+    @mock.patch('oslo_concurrency.lockutils.lock')
+    def test_on_deleted(self, m_lock):
+        pod = self.pod
+        pod['vif_unplugged'] = True
+        pod_name = 'testing/default'
+        self.registry[pod_name] = pod
+        self.watcher.on_deleted(pod)
+        self.assertNotIn(pod_name, self.registry)
+
+    @mock.patch('oslo_concurrency.lockutils.lock')
+    def test_on_deleted_false(self, m_lock):
+        pod = self.pod
+        pod_name = 'testing/default'
+        self.registry[pod_name] = pod
+        self.watcher.on_deleted(pod)
+        self.assertIn(pod_name, self.registry)
+        self.assertIs(True, pod['del_received'])

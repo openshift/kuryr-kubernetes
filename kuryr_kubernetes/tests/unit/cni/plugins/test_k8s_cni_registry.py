@@ -20,16 +20,20 @@ from kuryr_kubernetes.cni.plugins import k8s_cni_registry
 from kuryr_kubernetes import exceptions
 from kuryr_kubernetes.tests import base
 from kuryr_kubernetes.tests import fake
+from kuryr_kubernetes.tests.unit import kuryr_fixtures
 
 
 class TestK8sCNIRegistryPlugin(base.TestCase):
     def setUp(self):
         super(TestK8sCNIRegistryPlugin, self).setUp()
+        self.k8s_mock = self.useFixture(kuryr_fixtures.MockK8sClient()).client
         self.pod = {'metadata': {'name': 'foo', 'uid': 'bar',
-                                 'namespace': 'default'}}
+                                 'namespace': 'default', 'selfLink': 'baz'}}
         self.vifs = fake._fake_vifs_dict()
         registry = {'default/foo': {'pod': self.pod, 'vifs': self.vifs,
-                                    'containerid': None}}
+                                    'containerid': None,
+                                    'vif_unplugged': False,
+                                    'del_received': False}}
         healthy = mock.Mock()
         self.plugin = k8s_cni_registry.K8sCNIRegistryPlugin(registry, healthy)
         self.params = mock.Mock(args=mock.Mock(K8S_POD_NAME='foo',
@@ -40,6 +44,8 @@ class TestK8sCNIRegistryPlugin(base.TestCase):
     @mock.patch('oslo_concurrency.lockutils.lock')
     @mock.patch('kuryr_kubernetes.cni.binding.base.connect')
     def test_add_present(self, m_connect, m_lock):
+        self.k8s_mock.get.return_value = self.pod
+
         self.plugin.add(self.params)
 
         m_lock.assert_called_with('default/foo', external=True)
@@ -50,14 +56,32 @@ class TestK8sCNIRegistryPlugin(base.TestCase):
         self.assertEqual('cont_id',
                          self.plugin.registry['default/foo']['containerid'])
 
+    @mock.patch('oslo_concurrency.lockutils.lock')
     @mock.patch('kuryr_kubernetes.cni.binding.base.disconnect')
-    def test_del_present(self, m_disconnect):
+    def test_del_present(self, m_disconnect, m_lock):
         self.plugin.delete(self.params)
 
+        m_lock.assert_called_with('default/foo', external=True)
         m_disconnect.assert_called_with(mock.ANY, mock.ANY, 'eth0', 123,
                                         report_health=mock.ANY,
                                         is_default_gateway=mock.ANY,
                                         container_id='cont_id')
+        self.assertIn('default/foo', self.plugin.registry)
+        self.assertEqual(True,
+                         self.plugin.registry['default/foo']['vif_unplugged'])
+
+    @mock.patch('oslo_concurrency.lockutils.lock')
+    @mock.patch('kuryr_kubernetes.cni.binding.base.disconnect')
+    def test_remove_pod_from_registry_after_del(self, m_disconnect, m_lock):
+        self.plugin.registry['default/foo']['del_received'] = True
+        self.plugin.delete(self.params)
+
+        m_lock.assert_called_with('default/foo', external=True)
+        m_disconnect.assert_called_with(mock.ANY, mock.ANY, 'eth0', 123,
+                                        report_health=mock.ANY,
+                                        is_default_gateway=mock.ANY,
+                                        container_id='cont_id')
+        self.assertNotIn('default/foo', self.plugin.registry)
 
     @mock.patch('kuryr_kubernetes.cni.binding.base.disconnect')
     def test_del_wrong_container_id(self, m_disconnect):
@@ -74,12 +98,16 @@ class TestK8sCNIRegistryPlugin(base.TestCase):
     @mock.patch('kuryr_kubernetes.cni.binding.base.connect')
     def test_add_present_on_5_try(self, m_connect, m_lock):
         se = [KeyError] * 5
-        se.append({'pod': self.pod, 'vifs': self.vifs, 'containerid': None})
-        se.append({'pod': self.pod, 'vifs': self.vifs, 'containerid': None})
-        se.append({'pod': self.pod, 'vifs': self.vifs, 'containerid': None})
+        se.append({'pod': self.pod, 'vifs': self.vifs, 'containerid': None,
+                   'vif_unplugged': False, 'del_received': False})
+        se.append({'pod': self.pod, 'vifs': self.vifs, 'containerid': None,
+                   'vif_unplugged': False, 'del_received': False})
+        se.append({'pod': self.pod, 'vifs': self.vifs, 'containerid': None,
+                   'vif_unplugged': False, 'del_received': False})
         m_getitem = mock.Mock(side_effect=se)
         m_setitem = mock.Mock()
-        m_registry = mock.Mock(__getitem__=m_getitem, __setitem__=m_setitem)
+        m_registry = mock.Mock(__getitem__=m_getitem, __setitem__=m_setitem,
+                               __contains__=mock.Mock(return_value=False))
         self.plugin.registry = m_registry
         self.plugin.add(self.params)
 
@@ -87,20 +115,24 @@ class TestK8sCNIRegistryPlugin(base.TestCase):
         m_setitem.assert_called_once_with('default/foo',
                                           {'pod': self.pod,
                                            'vifs': self.vifs,
-                                           'containerid': 'cont_id'})
+                                           'containerid': 'cont_id',
+                                           'vif_unplugged': False,
+                                           'del_received': False})
         m_connect.assert_called_with(mock.ANY, mock.ANY, 'eth0', 123,
                                      report_health=mock.ANY,
                                      is_default_gateway=mock.ANY,
                                      container_id='cont_id')
 
     @mock.patch('time.sleep', mock.Mock())
+    @mock.patch('oslo_concurrency.lockutils.lock', mock.Mock(
+        return_value=mock.Mock(__enter__=mock.Mock(), __exit__=mock.Mock())))
     def test_add_not_present(self):
         cfg.CONF.set_override('vif_annotation_timeout', 0, group='cni_daemon')
         self.addCleanup(cfg.CONF.set_override, 'vif_annotation_timeout', 120,
                         group='cni_daemon')
 
         m_getitem = mock.Mock(side_effect=KeyError)
-        m_registry = mock.Mock(__getitem__=m_getitem)
+        m_registry = mock.Mock(__getitem__=m_getitem, __contains__=False)
         self.plugin.registry = m_registry
         self.assertRaises(exceptions.ResourceNotReady, self.plugin.add,
                           self.params)
