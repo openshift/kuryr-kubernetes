@@ -37,6 +37,7 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
     def __init__(self):
         self.os_net = clients.get_network_client()
         self.kubernetes = clients.get_kubernetes_client()
+        self.nodes_subnets_driver = base.NodesSubnetsDriver.get_instance()
 
     def ensure_network_policy(self, policy):
         """Create security group rules out of network policies
@@ -147,9 +148,9 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
         if CONF.octavia_defaults.enforce_sg_rules:
             default_cidrs.append(utils.get_subnet_cidr(
                 CONF.neutron_defaults.service_subnet))
-        worker_subnet_id = CONF.pod_vif_nested.worker_nodes_subnet
-        if worker_subnet_id:
-            default_cidrs.append(utils.get_subnet_cidr(worker_subnet_id))
+        worker_subnet_ids = self.nodes_subnets_driver.get_nodes_subnets()
+        default_cidrs.extend(utils.get_subnets_cidrs(worker_subnet_ids))
+
         for cidr in default_cidrs:
             ethertype = constants.IPv4
             if ipaddress.ip_network(cidr).version == constants.IP_VERSION_6:

@@ -20,9 +20,11 @@ from oslo_config import cfg as oslo_cfg
 from oslo_log import log as logging
 
 from kuryr_kubernetes import clients
+from kuryr_kubernetes.controller.drivers import base
 from kuryr_kubernetes.controller.drivers import neutron_vif
 
 
+CONF = oslo_cfg.CONF
 LOG = logging.getLogger(__name__)
 
 
@@ -30,28 +32,34 @@ class NestedPodVIFDriver(neutron_vif.NeutronPodVIFDriver,
                          metaclass=abc.ABCMeta):
     """Skeletal handler driver for VIFs for Nested Pods."""
 
+    def __init__(self):
+        super().__init__()
+        self.nodes_subnets_driver = base.NodesSubnetsDriver.get_instance()
+
     def _get_parent_port_by_host_ip(self, node_fixed_ip):
         os_net = clients.get_network_client()
-        node_subnet_id = oslo_cfg.CONF.pod_vif_nested.worker_nodes_subnet
-        if not node_subnet_id:
-            raise oslo_cfg.RequiredOptError(
-                'worker_nodes_subnet', oslo_cfg.OptGroup('pod_vif_nested'))
+        node_subnet_ids = self.nodes_subnets_driver.get_nodes_subnets(
+            raise_on_empty=True)
 
+        fixed_ips = ['ip_address=%s' % str(node_fixed_ip)]
+        filters = {'fixed_ips': fixed_ips}
+        tags = CONF.neutron_defaults.resource_tags
+        if tags:
+            filters['tags'] = tags
         try:
-            fixed_ips = ['subnet_id=%s' % str(node_subnet_id),
-                         'ip_address=%s' % str(node_fixed_ip)]
-            ports = os_net.ports(fixed_ips=fixed_ips)
+            ports = os_net.ports(**filters)
         except os_exc.SDKException:
-            LOG.error("Parent vm port with fixed ips %s not found!",
-                      fixed_ips)
+            LOG.error("Parent VM port with fixed IPs %s not found!", fixed_ips)
             raise
 
-        try:
-            return next(ports)
-        except StopIteration:
-            LOG.error("Neutron port for vm port with fixed ips %s not found!",
-                      fixed_ips)
-            raise kl_exc.NoResourceException
+        for port in ports:
+            for fip in port.fixed_ips:
+                if fip.get('subnet_id') in node_subnet_ids:
+                    return port
+
+        LOG.error("Neutron port for VM port with fixed IPs %s not found!",
+                  fixed_ips)
+        raise kl_exc.NoResourceException()
 
     def _get_parent_port(self, pod):
         try:

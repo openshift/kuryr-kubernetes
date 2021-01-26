@@ -142,6 +142,9 @@ k8s_opts = [
                help=_("The driver that manages VIFs pools for "
                       "Kubernetes Pods"),
                default='noop'),
+    cfg.StrOpt('nodes_subnets_driver',
+               help=_("The driver that manages listing K8s nodes subnet_ids."),
+               default='config'),
     cfg.BoolOpt('port_debug',
                 help=_('Enable port debug to force kuryr port names to be '
                        'set to their corresponding pod names.'),
@@ -268,9 +271,11 @@ cache_defaults = [
 ]
 
 nested_vif_driver_opts = [
-    cfg.StrOpt('worker_nodes_subnet',
-               help=_("Neutron subnet ID for k8s worker node vms."),
-               default=''),
+    cfg.ListOpt('worker_nodes_subnets',
+                help=_("Neutron subnet IDs for k8s worker node VMs."),
+                default=[],
+                deprecated_name='worker_nodes_subnet',
+                deprecated_group='pod_vif_nested'),
     cfg.IntOpt('rev_update_attempts',
                help=_("How many time to try to re-update the neutron resource "
                       "when revision has been changed by other thread"),
