@@ -193,7 +193,8 @@ class KuryrNetworkPolicyHandler(k8s_base.ResourceEventHandler):
         pods_to_update.extend(matched_pods)
 
         for pod in pods_to_update:
-            if driver_utils.is_host_network(pod):
+            if (driver_utils.is_host_network(pod) or
+                    not driver_utils.is_pod_scheduled(pod)):
                 continue
             pod_sgs = self._drv_pod_sg.get_security_groups(pod, project_id)
             try:
@@ -269,7 +270,8 @@ class KuryrNetworkPolicyHandler(k8s_base.ResourceEventHandler):
 
         if crd_sg:
             for pod in pods_to_update:
-                if driver_utils.is_host_network(pod):
+                if (driver_utils.is_host_network(pod)
+                        or not driver_utils.is_pod_scheduled(pod)):
                     continue
                 pod_sgs = self._drv_pod_sg.get_security_groups(pod, project_id)
                 if crd_sg in pod_sgs:
