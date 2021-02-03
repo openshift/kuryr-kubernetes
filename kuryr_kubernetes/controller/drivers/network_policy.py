@@ -283,7 +283,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
             for container_port, pods in matched_pods.items():
                 sg_rule = driver_utils.create_security_group_rule_body(
                     direction, container_port,
-                    protocol=port.get('protocol'),
+                    # Pod's spec.containers[].port.protocol defaults to TCP
+                    protocol=port.get('protocol', 'TCP'),
                     cidr=cidr, pods=pods)
                 if sg_rule not in crd_rules:
                     crd_rules.append(sg_rule)
@@ -291,7 +292,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     self._create_svc_egress_sg_rule(
                         policy_namespace, crd_rules,
                         resource=resource, port=container_port,
-                        protocol=port.get('protocol'))
+                        # Pod's spec.containers[].port.protocol defaults to TCP
+                        protocol=port.get('protocol', 'TCP'))
 
     def _create_sg_rule_body_on_text_port(self, direction, port,
                                           resources, crd_rules, pod_selector,
@@ -345,7 +347,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                 for ethertype in (constants.IPv4, constants.IPv6):
                     sg_rule = driver_utils.create_security_group_rule_body(
                         direction, container_port,
-                        protocol=port.get('protocol'),
+                        # Pod's spec.containers[].port.protocol defaults to TCP
+                        protocol=port.get('protocol', 'TCP'),
                         ethertype=ethertype,
                         pods=pods)
                     crd_rules.append(sg_rule)
@@ -363,7 +366,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
             sg_rule = (
                 driver_utils.create_security_group_rule_body(
                     direction, port.get('port'),
-                    protocol=port.get('protocol'),
+                    # NP's ports[].protocol defaults to TCP
+                    protocol=port.get('protocol', 'TCP'),
                     cidr=cidr,
                     namespace=ns))
             sg_rule_body_list.append(sg_rule)
@@ -371,7 +375,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                 self._create_svc_egress_sg_rule(
                     policy_namespace, sg_rule_body_list,
                     resource=resource, port=port.get('port'),
-                    protocol=port.get('protocol'))
+                    # NP's ports[].protocol defaults to TCP
+                    protocol=port.get('protocol', 'TCP'))
 
     def _create_all_pods_sg_rules(self, port, direction,
                                   sg_rule_body_list, pod_selector,
@@ -388,7 +393,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     driver_utils.create_security_group_rule_body(
                         direction, port.get('port'),
                         ethertype=ethertype,
-                        protocol=port.get('protocol')))
+                        # NP's ports[].protocol defaults to TCP
+                        protocol=port.get('protocol', 'TCP')))
                 sg_rule_body_list.append(sg_rule)
 
     def _create_default_sg_rule(self, direction, sg_rule_body_list):
@@ -505,8 +511,6 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                         continue
                     rule = driver_utils.create_security_group_rule_body(
                         direction,
-                        port_range_min=1,
-                        port_range_max=65535,
                         cidr=cidr,
                         namespace=namespace)
                     sg_rule_body_list.append(rule)
@@ -518,8 +522,6 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     for ethertype in (constants.IPv4, constants.IPv6):
                         rule = driver_utils.create_security_group_rule_body(
                             direction,
-                            port_range_min=1,
-                            port_range_max=65535,
                             ethertype=ethertype)
                         sg_rule_body_list.append(rule)
             else:
