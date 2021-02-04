@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from oslo_config import cfg
 from oslo_log import log as logging
 
 from kuryr_kubernetes import clients
@@ -22,6 +23,7 @@ from kuryr_kubernetes.handlers import k8s_base
 from kuryr_kubernetes import utils
 
 LOG = logging.getLogger(__name__)
+CONF = cfg.CONF
 
 
 class KuryrNetworkPopulationHandler(k8s_base.ResourceEventHandler):
@@ -55,7 +57,8 @@ class KuryrNetworkPopulationHandler(k8s_base.ResourceEventHandler):
         # required
         subnets = self._drv_subnets.get_namespace_subnet(namespace, subnet_id)
 
-        nodes = utils.get_nodes_ips()
+        node_subnets = [CONF.pod_vif_nested.worker_nodes_subnet]
+        nodes = utils.get_nodes_ips(node_subnets)
         # NOTE(ltomasbo): Patching the kuryrnet_crd here instead of after
         # populate_pool method to ensure initial repopulation is not happening
         # twice upon unexpected problems, such as neutron failing to
