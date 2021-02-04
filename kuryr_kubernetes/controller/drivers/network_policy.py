@@ -214,7 +214,7 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
 
     def _parse_selectors(self, rule_block, rule_direction, policy_namespace):
         allowed_resources = []
-        allow_all = False
+        allowed_cidrs = None
         selectors = False
         for rule in rule_block.get(rule_direction, []):
             namespace_selector = rule.get('namespaceSelector')
@@ -226,8 +226,13 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     allowed_resources.extend(self._get_pods(
                         pod_selector))
                 else:
-                    # allow from all
-                    allow_all = True
+                    # allow from all the cluster, which means pod subnets and
+                    # service subnet.
+                    allowed_cidrs = utils.get_subnetpool_cidrs(
+                        CONF.namespace_subnet.pod_subnet_pool)
+                    if CONF.octavia_defaults.enforce_sg_rules:
+                        allowed_cidrs.append(utils.get_subnet_cidr(
+                            CONF.neutron_defaults.service_subnet))
             elif namespace_selector:
                 selectors = True
                 if pod_selector:
@@ -255,10 +260,10 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                         pod_selector,
                         namespace=policy_namespace))
 
-        return allow_all, selectors, allowed_resources
+        return allowed_cidrs, selectors, allowed_resources
 
     def _create_sg_rules_with_container_ports(
-        self, container_ports, allow_all, resource, matched_pods,
+        self, container_ports, allowed_cidrs, resource, matched_pods,
             crd_rules, direction, port, pod_selector=None,
             policy_namespace=None):
         cidr, ns = self._get_resource_details(resource)
@@ -279,7 +284,7 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                 matched_pods[container_port].update(pod_info)
             else:
                 matched_pods[container_port] = pod_info
-        if not allow_all and matched_pods and cidr:
+        if not allowed_cidrs and matched_pods and cidr:
             for container_port, pods in matched_pods.items():
                 sg_rule = driver_utils.create_security_group_rule_body(
                     direction, container_port,
@@ -297,7 +302,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
 
     def _create_sg_rule_body_on_text_port(self, direction, port,
                                           resources, crd_rules, pod_selector,
-                                          policy_namespace, allow_all=False):
+                                          policy_namespace,
+                                          allowed_cidrs=None):
         """Create SG rules when named port is used in the NP rule
 
         In case of ingress, the pods selected by NetworkPolicySpec's
@@ -316,8 +322,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
         param crd_rules: list of parsed SG rules
         param pod_selector: dict with NetworkPolicySpec's podSelector
         param policy_namespace: string with policy namespace
-        param allow_all: True if should parse a allow from/to all rule,
-        False otherwise
+        param allowed_cidrs: None, or a list of cidrs, where/from the traffic
+                             should be allowed.
         """
         matched_pods = {}
         if direction == "ingress":
@@ -327,7 +333,7 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                 container_ports = driver_utils.get_ports(selected_pod, port)
                 for resource in resources:
                     self._create_sg_rules_with_container_ports(
-                        container_ports, allow_all, resource, matched_pods,
+                        container_ports, allowed_cidrs, resource, matched_pods,
                         crd_rules, direction, port)
         elif direction == "egress":
             for resource in resources:
@@ -339,17 +345,17 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     continue
                 container_ports = driver_utils.get_ports(resource, port)
                 self._create_sg_rules_with_container_ports(
-                    container_ports, allow_all, resource, matched_pods,
+                    container_ports, allowed_cidrs, resource, matched_pods,
                     crd_rules, direction, port, pod_selector,
                     policy_namespace)
-        if allow_all:
+        if allowed_cidrs:
             container_port = None
             for container_port, pods in matched_pods.items():
-                for ethertype in (constants.IPv4, constants.IPv6):
+                for cidr in allowed_cidrs:
                     sg_rule = driver_utils.create_security_group_rule_body(
                         direction, container_port,
                         protocol=port.get('protocol', 'TCP'),
-                        ethertype=ethertype,
+                        cidr=cidr,
                         pods=pods)
                     crd_rules.append(sg_rule)
             if direction == 'egress':
@@ -384,13 +390,20 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
 
     def _create_all_pods_sg_rules(self, port, direction,
                                   sg_rule_body_list, pod_selector,
-                                  policy_namespace):
-        if type(port.get('port')) is not int:
+                                  policy_namespace, allowed_cidrs=None):
+        if not isinstance(port.get('port'), int):
             all_pods = driver_utils.get_namespaced_pods().get('items')
             self._create_sg_rule_body_on_text_port(
                 direction, port, all_pods,
                 sg_rule_body_list, pod_selector, policy_namespace,
-                allow_all=True)
+                allowed_cidrs=allowed_cidrs)
+        elif allowed_cidrs:
+            for cidr in allowed_cidrs:
+                sg_rule = driver_utils.create_security_group_rule_body(
+                        direction, port.get('port'),
+                        protocol=port.get('protocol'),
+                        cidr=cidr)
+                sg_rule_body_list.append(sg_rule)
         else:
             for ethertype in (constants.IPv4, constants.IPv6):
                 sg_rule = (
@@ -427,9 +440,11 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
         It accounts for special cases, such as:
         - PolicyTypes stating only Egress: ensuring ingress is not restricted
         - PolicyTypes not including Egress: ensuring egress is not restricted
-        - {} ingress/egress rules: applying default open for all
+        - {} ingress/egress rules: applying default open for all the cluster
         """
+        _create_sg_rule_body = driver_utils.create_security_group_rule_body
         rule_list = policy['spec'].get(direction)
+
         if not rule_list:
             policy_types = policy['spec'].get('policyTypes')
             if direction == 'ingress':
@@ -462,15 +477,16 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
             LOG.debug('Applying default all open policy from %s',
                       policy['metadata']['selfLink'])
             for ethertype in (constants.IPv4, constants.IPv6):
-                rule = driver_utils.create_security_group_rule_body(
-                    direction, ethertype=ethertype)
+                rule = _create_sg_rule_body(direction, ethertype=ethertype)
                 sg_rule_body_list.append(rule)
 
         for rule_block in rule_list:
             LOG.debug('Parsing %(dir)s Rule %(rule)s', {'dir': direction,
                                                         'rule': rule_block})
-            allow_all, selectors, allowed_resources = self._parse_selectors(
-                rule_block, rule_direction, policy_namespace)
+            (allowed_cidrs, selectors,
+             allowed_resources) = self._parse_selectors(rule_block,
+                                                        rule_direction,
+                                                        policy_namespace)
 
             ipblock_list = []
 
@@ -492,8 +508,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
 
             if 'ports' in rule_block:
                 for port in rule_block['ports']:
-                    if allowed_resources or allow_all or selectors:
-                        if type(port.get('port')) is not int:
+                    if allowed_resources or allowed_cidrs or selectors:
+                        if not isinstance(port.get('port'), int):
                             self._create_sg_rule_body_on_text_port(
                                 direction, port, allowed_resources,
                                 sg_rule_body_list, pod_selector,
@@ -502,15 +518,15 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                             self._create_sg_rule_on_number_port(
                                 allowed_resources, direction, port,
                                 sg_rule_body_list, policy_namespace)
-                        if allow_all:
+                        if allowed_cidrs:
                             self._create_all_pods_sg_rules(
                                 port, direction, sg_rule_body_list,
-                                pod_selector, policy_namespace)
+                                pod_selector, policy_namespace, allowed_cidrs)
                     else:
                         self._create_all_pods_sg_rules(
                             port, direction, sg_rule_body_list,
                             pod_selector, policy_namespace)
-            elif allowed_resources or allow_all or selectors:
+            elif allowed_resources or allowed_cidrs or selectors:
                 for resource in allowed_resources:
                     cidr, namespace = self._get_resource_details(resource)
                     # NOTE(maysams): Skipping resource that do not have
@@ -518,20 +534,16 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     # will be triggered again after the resource is running.
                     if not cidr:
                         continue
-                    rule = driver_utils.create_security_group_rule_body(
-                        direction,
-                        cidr=cidr,
-                        namespace=namespace)
+                    rule = _create_sg_rule_body(direction, cidr=cidr,
+                                                namespace=namespace)
                     sg_rule_body_list.append(rule)
                     if direction == 'egress':
                         self._create_svc_egress_sg_rule(
                             policy_namespace, sg_rule_body_list,
                             resource=resource)
-                if allow_all:
-                    for ethertype in (constants.IPv4, constants.IPv6):
-                        rule = driver_utils.create_security_group_rule_body(
-                            direction,
-                            ethertype=ethertype)
+                if allowed_cidrs:
+                    for cidr in allowed_cidrs:
+                        rule = _create_sg_rule_body(direction, cidr=cidr)
                         sg_rule_body_list.append(rule)
                         if direction == 'egress':
                             self._create_svc_egress_sg_rule(policy_namespace,
