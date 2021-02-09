@@ -31,8 +31,8 @@
         Q_ML2_PLUGIN_MECHANISM_DRIVERS: ovn,logger
         Q_ML2_PLUGIN_TYPE_DRIVERS: local,flat,vlan,geneve
         Q_ML2_TENANT_NETWORK_TYPE: geneve
-        VAR_RUN_PATH: /usr/local/var/run
         Q_USE_PROVIDERNET_FOR_PUBLIC: true
+        VAR_RUN_PATH: /var/run
         PHYSICAL_NETWORK: public
         OVN_L3_CREATE_PUBLIC_NETWORK: true
         ENABLE_CHASSIS_AS_GW: true
@@ -138,8 +138,8 @@
         Q_ML2_PLUGIN_MECHANISM_DRIVERS: ovn,logger
         Q_ML2_PLUGIN_TYPE_DRIVERS: local,flat,vlan,geneve
         Q_ML2_TENANT_NETWORK_TYPE: geneve
-        VAR_RUN_PATH: /usr/local/var/run
         Q_USE_PROVIDERNET_FOR_PUBLIC: true
+        VAR_RUN_PATH: /var/run
         PHYSICAL_NETWORK: public
         OVN_L3_CREATE_PUBLIC_NETWORK: true
         ENABLE_CHASSIS_AS_GW: true
@@ -177,9 +177,9 @@
               amp_active_retries: 9999
             api_settings:
               enabled_provider_drivers: amphora:'Octavia Amphora driver',ovn:'Octavia OVN driver'
-      kubetest_version: v1.17.3
+      kubetest_version: v1.20.2
       np_parallel_number: 2
-      gopkg: go1.13.5.linux-amd64.tar.gz
+      gopkg: go1.15.2.linux-amd64.tar.gz
       np_sleep: 30
       zuul_copy_output:
         '/home/zuul/np_kubetest.log': 'logs'

@@ -43,8 +43,8 @@ enable_service q-svc
 
 # VAR RUN PATH
 # =============
-# VAR_RUN_PATH=/var/run
-VAR_RUN_PATH=/usr/local/var/run
+# VAR_RUN_PATH=/usr/local/var/run
+VAR_RUN_PATH=/var/run
 
 # OCTAVIA
 # Uncomment it to use L2 communication between loadbalancer and member pods
@@ -75,6 +75,7 @@ enable_service o-api
 enable_service o-cw
 enable_service o-hm
 enable_service o-hk
+enable_service o-da
 ## Octavia Deps
 ### Nova
 enable_service n-api
