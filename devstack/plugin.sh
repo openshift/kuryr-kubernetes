@@ -383,6 +383,12 @@ function configure_neutron_defaults {
         --description "k8s service subnet UDP allowed" \
         --remote-ip "$service_cidr" --ethertype "$KURYR_ETHERTYPE" --protocol udp \
         "$service_pod_access_sg_id"
+    # Octavia supports SCTP load balancing, we need to also allow SCTP traffic
+    openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
+        security group rule create --project "$project_id" \
+        --description "k8s service subnet SCTP allowed" \
+        --remote-ip "$service_cidr" --ethertype "$KURYR_ETHERTYPE" --protocol sctp \
+        "$service_pod_access_sg_id"
 
     if [[ "$KURYR_K8S_OCTAVIA_MEMBER_MODE" == "L3" ]]; then
         if [ -n "$sg_ids" ]; then
@@ -417,6 +423,12 @@ function configure_neutron_defaults {
             security group rule create --project "$project_id" \
             --description "k8s pod subnet allowed from k8s-pod-subnet" \
             --remote-ip "$pod_cidr" --ethertype "$KURYR_ETHERTYPE" --protocol udp \
+            "$octavia_pod_access_sg_id"
+        # Octavia supports SCTP load balancing, we need to also support SCTP traffic
+        openstack --os-cloud devstack-admin --os-region "$REGION_NAME" \
+            security group rule create --project "$project_id" \
+            --description "k8s pod subnet allowed from k8s-pod-subnet" \
+            --remote-ip "$pod_cidr" --ethertype "$KURYR_ETHERTYPE" --protocol sctp \
             "$octavia_pod_access_sg_id"
         if [ -n "$sg_ids" ]; then
             sg_ids+=",${octavia_pod_access_sg_id}"
@@ -523,7 +535,7 @@ function prepare_kubernetes_files {
     sudo CERT_DIR=${KURYR_KUBERNETES_DATA_DIR} /tmp/make-ca-cert.sh $(hostname -I | awk '{print $1}') "IP:${HOST_IP},IP:${k8s_api_clusterip},DNS:kubernetes,DNS:kubernetes.default,DNS:kubernetes.default.svc,DNS:kubernetes.default.svc.cluster.local"
 
     # Create basic token authorization
-    sudo bash -c "echo 'admin,admin,admin' > $KURYR_KUBERNETES_DATA_DIR/basic_auth.csv"
+    sudo bash -c "echo 'admin,admin,admin' > $KURYR_KUBERNETES_DATA_DIR/token_auth.csv"
 
     # Create known tokens for service accounts
     sudo bash -c "echo '$(create_token),admin,admin' >> ${KURYR_KUBERNETES_DATA_DIR}/known_tokens.csv"
@@ -642,12 +654,13 @@ function run_k8s_api {
                 --insecure-port=${KURYR_K8S_API_PORT} \
                 --etcd-servers=http://${SERVICE_HOST}:${ETCD_PORT} \
                 --client-ca-file=${KURYR_KUBERNETES_DATA_DIR}/ca.crt \
-                --basic-auth-file=${KURYR_KUBERNETES_DATA_DIR}/basic_auth.csv \
+                --token-auth-file=${KURYR_KUBERNETES_DATA_DIR}/token_auth.csv \
                 --min-request-timeout=300 \
                 --tls-cert-file=${KURYR_KUBERNETES_DATA_DIR}/server.cert \
                 --tls-private-key-file=${KURYR_KUBERNETES_DATA_DIR}/server.key \
                 --token-auth-file=${KURYR_KUBERNETES_DATA_DIR}/known_tokens.csv \
                 --allow-privileged=true \
+                --feature-gates="SCTPSupport=true" \
                 --v=$(get_k8s_log_level) \
                 --logtostderr=true"
 
@@ -671,6 +684,7 @@ function run_k8s_controller_manager {
                 --min-resync-period=3m \
                 --v=$(get_k8s_log_level) \
                 --logtostderr=true \
+                --feature-gates="SCTPSupport=true" \
                 --leader-elect=false"
 
     run_process kubernetes-controller-manager "$command" root root
@@ -690,6 +704,7 @@ function run_k8s_scheduler {
                 --master=${KURYR_K8S_API_URL} \
                 --v=$(get_k8s_log_level) \
                 --logtostderr=true \
+                --feature-gates="SCTPSupport=true" \
                 --leader-elect=false"
 
     run_process kubernetes-scheduler "$command" root root
@@ -745,13 +760,14 @@ function run_k8s_kubelet {
         --address=0.0.0.0 \
         --enable-server \
         --network-plugin=cni \
+        --feature-gates="SCTPSupport=true" \
         --cni-bin-dir=$CNI_BIN_DIR \
         --cni-conf-dir=$CNI_CONF_DIR \
         --cert-dir=${KURYR_KUBERNETES_DATA_DIR}/kubelet.cert \
         --root-dir=${KURYR_KUBERNETES_DATA_DIR}/kubelet"
 
     if [[ ${CONTAINER_ENGINE} == 'docker' ]]; then
-        command+=" --cgroup-driver $(docker info|awk '/Cgroup/ {print $NF}')"
+        command+=" --cgroup-driver $(docker info -f '{{.CgroupDriver}}')"
     elif [[ ${CONTAINER_ENGINE} == 'crio' ]]; then
         local crio_conf
         crio_conf=/etc/crio/crio.conf

@@ -173,11 +173,13 @@ class TestUtils(test_base.TestCase):
     def test_get_service_ports(self):
         service = {'spec': {'ports': [
             {'port': 1, 'targetPort': 1},
-            {'port': 2, 'name': 'X', 'protocol': 'UDP', 'targetPort': 2}
+            {'port': 2, 'name': 'X', 'protocol': 'UDP', 'targetPort': 2},
+            {'port': 3, 'name': 'Y', 'protocol': 'SCTP', 'targetPort': 3}
         ]}}
         expected_ret = [
             {'port': 1, 'name': None, 'protocol': 'TCP', 'targetPort': '1'},
-            {'port': 2, 'name': 'X', 'protocol': 'UDP', 'targetPort': '2'}]
+            {'port': 2, 'name': 'X', 'protocol': 'UDP', 'targetPort': '2'},
+            {'port': 3, 'name': 'Y', 'protocol': 'SCTP', 'targetPort': '3'}]
 
         ret = utils.get_service_ports(service)
         self.assertEqual(expected_ret, ret)
@@ -311,16 +313,22 @@ class TestUtils(test_base.TestCase):
 
     def test_get_nodes_ips(self):
         os_net = self.useFixture(k_fix.MockNetworkClient()).client
-        ip1 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.1'}],
+        ip1 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.1',
+                                          'subnet_id': 'foo'}],
                            'trunk_details': True})
-        ip2 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.2'}],
+        ip2 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.2',
+                                         'subnet_id': 'bar'}],
                            'trunk_details': True})
-        ip3 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.3'}],
+        ip3 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.3',
+                                          'subnet_id': 'baz'}],
                            'trunk_details': None})
-        ports = (p for p in [ip1, ip2, ip3])
+        ip4 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.4',
+                                          'subnet_id': 'zab'}],
+                           'trunk_details': True})
+        ports = (p for p in [ip1, ip2, ip3, ip4])
 
         os_net.ports.return_value = ports
-        trunk_ips = utils.get_nodes_ips()
+        trunk_ips = utils.get_nodes_ips(['foo', 'bar'])
         os_net.ports.assert_called_once_with(status='ACTIVE')
         self.assertEqual(trunk_ips, [ip1.fixed_ips[0]['ip_address'],
                                      ip2.fixed_ips[0]['ip_address']])
@@ -331,14 +339,16 @@ class TestUtils(test_base.TestCase):
                         group='neutron_defaults')
 
         os_net = self.useFixture(k_fix.MockNetworkClient()).client
-        ip1 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.1'}],
+        ip1 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.1',
+                                          'subnet_id': 'foo'}],
                            'trunk_details': True})
-        ip2 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.2'}],
+        ip2 = munch.Munch({'fixed_ips': [{'ip_address': '10.0.0.2',
+                                          'subnet_id': 'bar'}],
                            'trunk_details': False})
         ports = (p for p in [ip1, ip2])
 
         os_net.ports.return_value = ports
-        trunk_ips = utils.get_nodes_ips()
+        trunk_ips = utils.get_nodes_ips(['foo'])
         os_net.ports.assert_called_once_with(status='ACTIVE', tags=['foo'])
         self.assertEqual(trunk_ips, [ip1.fixed_ips[0]['ip_address']])
 
