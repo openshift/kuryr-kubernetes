@@ -53,8 +53,13 @@ class NestedDriver(health.HealthHandler, b_base.BaseBindingDriver):
         # First let's take a peek into the pod namespace and try to remove any
         # leftover interface in case we got restarted before CNI returned to
         # kubelet.
-        with b_base.get_ipdb(netns) as c_ipdb:
-            self._remove_ifaces(c_ipdb, (temp_name, ifname), netns)
+        # NOTE(dulek): CNI spec guarantees getting correct CNI_NETNS in the CNI
+        #              request. Unfortunately some CNI implementations doesn't
+        #              do that so let's protect here from attemtps to remove
+        #              `eth0` on host netns when '' is passed as CNI_NETNS.
+        if netns:
+            with b_base.get_ipdb(netns) as c_ipdb:
+                self._remove_ifaces(c_ipdb, (temp_name, ifname), netns)
 
         # We might also have leftover interface in the host netns, let's try to
         # remove it too. This is outside of the main host's IPDB context
@@ -100,8 +105,13 @@ class NestedDriver(health.HealthHandler, b_base.BaseBindingDriver):
         #              the old netns is deleted. This might result in VLAN ID
         #              conflict. In oder to protect from that let's remove the
         #              netns ifaces here anyway.
-        with b_base.get_ipdb(netns) as c_ipdb:
-            self._remove_ifaces(c_ipdb, (vif.vif_name, ifname), netns)
+        # NOTE(dulek): CNI spec guarantees getting correct CNI_NETNS in the CNI
+        #              request. Unfortunately some CNI implementations doesn't
+        #              do that so let's protect here from attemtps to remove
+        #              `eth0` on host netns when '' is passed as CNI_NETNS.
+        if netns:
+            with b_base.get_ipdb(netns) as c_ipdb:
+                self._remove_ifaces(c_ipdb, (vif.vif_name, ifname), netns)
 
 
 class VlanDriver(NestedDriver):
