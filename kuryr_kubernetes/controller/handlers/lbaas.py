@@ -435,7 +435,7 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
             current_targets = {(a['ip'], p['port'],
                                 spec_ports.get(p.get('name')))
                                for s in endpoints['subsets']
-                               for a in s['addresses']
+                               for a in s.get('addresses', [])
                                for p in s['ports']
                                if p.get('name') in spec_ports}
 
