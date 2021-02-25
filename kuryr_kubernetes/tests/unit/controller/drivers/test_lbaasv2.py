@@ -239,6 +239,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
         m_driver._get_vip_port.return_value = {
             'security_groups': [mock.sentinel.sg_id]}
+        m_driver._octavia_acls = True
         loadbalancer = mock.Mock()
         listener = mock.Mock()
 
@@ -247,6 +248,26 @@ class TestLBaaSv2Driver(test_base.TestCase):
         m_driver._release.assert_called_once_with(loadbalancer, listener,
                                                   lbaas.delete_listener,
                                                   listener.id)
+
+    def test_release_listener_acls(self):
+        neutron = self.useFixture(k_fix.MockNeutronClient()).client
+        lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
+        neutron.list_security_group_rules.return_value = {
+            'security_group_rules': []}
+        cls = d_lbaasv2.LBaaSv2Driver
+        m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
+        m_driver._get_vip_port.return_value = {
+            'security_groups': [mock.sentinel.sg_id]}
+        m_driver._octavia_acls = True
+        loadbalancer = mock.Mock()
+        listener = mock.Mock()
+
+        cls.release_listener(m_driver, loadbalancer, listener)
+
+        m_driver._release.assert_called_once_with(loadbalancer, listener,
+                                                  lbaas.delete_listener,
+                                                  listener.id)
+        m_driver._get_vip_port.assert_not_called()
 
     def test_ensure_pool(self):
         cls = d_lbaasv2.LBaaSv2Driver
