@@ -670,10 +670,14 @@ class LBaaSv2Driver(base.LBaaSDriver):
                       lbaas.delete_listener,
                       listener.id)
 
+        if self._octavia_acls:
+            return
+
         if CONF.octavia_defaults.sg_mode == 'create':
             sg_id = self._find_listeners_sg(loadbalancer)
         else:
             sg_id = self._get_vip_port(loadbalancer).get('security_groups')[0]
+
         if sg_id:
             rules = neutron.list_security_group_rules(
                 security_group_id=sg_id, description=listener.name)
@@ -1018,6 +1022,11 @@ class LBaaSv2Driver(base.LBaaSDriver):
                 LOG.debug("Provisioning complete for %(lb)s", {
                     'lb': loadbalancer})
                 return
+            elif status == 'ERROR':
+                LOG.debug("Releasing loadbalancer %s with error status",
+                          loadbalancer['id'])
+                self.release_loadbalancer(loadbalancer)
+                break
             else:
                 LOG.debug("Provisioning status %(status)s for %(lb)s, "
                           "%(rem).3gs remaining until timeout",
