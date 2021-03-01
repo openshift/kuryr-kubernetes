@@ -1026,7 +1026,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
                 LOG.debug("Releasing loadbalancer %s with error status",
                           loadbalancer['id'])
                 self.release_loadbalancer(loadbalancer)
-                break
+                raise k_exc.ResourceNotReady(loadbalancer['id'])
             else:
                 LOG.debug("Provisioning status %(status)s for %(lb)s, "
                           "%(rem).3gs remaining until timeout",
