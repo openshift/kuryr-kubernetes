@@ -53,6 +53,9 @@ _OCTAVIA_SCTP_VERSION = 2, 23
 # HTTP Codes raised by Octavia when a Resource already exists
 OKAY_CODES = (409, 500)
 
+# Name of default Kubernetes Load-Balancer
+K8S_DEFAULT_SVC_NAME = 'default/kubernetes'
+
 
 class LBaaSv2Driver(base.LBaaSDriver):
     """LBaaSv2Driver implements LBaaSDriver for Neutron LBaaSv2 API."""
@@ -523,22 +526,32 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
     def _find_loadbalancer(self, loadbalancer):
         lbaas = clients.get_loadbalancer_client()
-        response = lbaas.load_balancers(
-            name=loadbalancer['name'],
-            project_id=loadbalancer['project_id'],
-            vip_address=str(loadbalancer['ip']),
-            vip_subnet_id=loadbalancer['subnet_id'],
-            provider=loadbalancer['provider'])
+        request = {
+            'project_id': loadbalancer['project_id'],
+            'vip_address': str(loadbalancer['ip'])}
+        if loadbalancer['name'] != K8S_DEFAULT_SVC_NAME:
+            request['name'] = loadbalancer['name']
+            request['vip_subnet_id'] = loadbalancer['subnet_id']
+            request['provider'] = loadbalancer['provider']
 
+        response = lbaas.load_balancers(**request)
         try:
             os_lb = next(response)  # openstacksdk returns a generator
             loadbalancer['id'] = os_lb.id
             loadbalancer['port_id'] = self._get_vip_port(loadbalancer).id
-            loadbalancer['provider'] = os_lb.provider
             if os_lb.provisioning_status == 'ERROR':
                 self.release_loadbalancer(loadbalancer)
                 utils.clean_lb_crd_status(loadbalancer['name'])
                 return None
+            # If an upgrade happened and provider is the same, the lb won't
+            # be recreated so let's update the API lb name to match the lb
+            # naming pattern in Kuryr.
+            elif (loadbalancer['name'] == K8S_DEFAULT_SVC_NAME and
+                    os_lb.name != K8S_DEFAULT_SVC_NAME and
+                    loadbalancer['provider'] == os_lb.provider):
+                lbaas.update_load_balancer(loadbalancer['id'],
+                                           name=K8S_DEFAULT_SVC_NAME)
+            loadbalancer['provider'] = os_lb.provider
         except (KeyError, StopIteration):
             return None
 
@@ -589,23 +602,31 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
     def _find_listener(self, listener, loadbalancer):
         lbaas = clients.get_loadbalancer_client()
-        response = lbaas.listeners(
-            name=listener['name'],
-            project_id=listener['project_id'],
-            load_balancer_id=listener['loadbalancer_id'],
-            protocol=listener['protocol'],
-            protocol_port=listener['port'])
+        request = {
+            'project_id': listener['project_id'],
+            'load_balancer_id': listener['loadbalancer_id'],
+            'protocol': listener['protocol'],
+            'protocol_port': listener['port']
+        }
 
+        if listener.get('name'):
+            request['name'] = listener['name']
+        response = lbaas.listeners(**request)
         try:
             os_listener = next(response)
             listener['id'] = os_listener.id
+            listener['name'] = os_listener.name
             if os_listener.provisioning_status == 'ERROR':
                 LOG.debug("Releasing listener %s", os_listener.id)
                 self.release_listener(loadbalancer, listener)
                 return None
         except (KeyError, StopIteration):
+            if (loadbalancer['name'] == K8S_DEFAULT_SVC_NAME and
+                    listener.get('name')):
+                listener['name'] = None
+                listener['protocol'] = 'HTTPS'
+                return self._find_listener(listener, loadbalancer)
             return None
-
         return listener
 
     def _create_pool(self, pool):
@@ -627,11 +648,13 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
     def _find_pool(self, pool, loadbalancer, by_listener=True):
         lbaas = clients.get_loadbalancer_client()
-        response = lbaas.pools(
-            name=pool['name'],
-            project_id=pool['project_id'],
-            loadbalancer_id=pool['loadbalancer_id'],
-            protocol=pool['protocol'])
+        request = {'project_id': pool['project_id'],
+                   'loadbalancer_id': pool['loadbalancer_id'],
+                   'protocol': pool['protocol']}
+        if loadbalancer['name'] != K8S_DEFAULT_SVC_NAME:
+            request['name'] = pool['name']
+        response = lbaas.pools(**request)
+
         # TODO(scavnic) check response
         try:
             if by_listener:
@@ -640,6 +663,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
             else:
                 pools = [p for p in response if pool.name == p.name]
             pool['id'] = pools[0].id
+            pool['name'] = pools[0].name
             if pools[0].provisioning_status == 'ERROR':
                 LOG.debug("Releasing pool %s", pool.id)
                 self.release_pool(loadbalancer, pool)
