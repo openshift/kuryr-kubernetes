@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
 import random
 from six.moves import http_client as httplib
 import time
@@ -57,6 +58,9 @@ _LB_STS_POLL_SLOW_INTERVAL = 3
 _OCTAVIA_TAGGING_VERSION = 2, 5
 _OCTAVIA_DL_VERSION = 2, 11
 _OCTAVIA_ACL_VERSION = 2, 12
+
+# HTTP Codes raised by Octavia when a Resource already exists
+OKAY_CODES = (409, 500)
 
 
 class LBaaSv2Driver(base.LBaaSDriver):
@@ -140,8 +144,9 @@ class LBaaSv2Driver(base.LBaaSDriver):
         request = obj_lbaas.LBaaSLoadBalancer(
             name=name, project_id=project_id, subnet_id=subnet_id, ip=ip,
             security_groups=security_groups_ids, provider=provider)
-        response = self._ensure(request, self._create_loadbalancer,
-                                self._find_loadbalancer)
+
+        response = self._ensure_loadbalancer(request)
+
         if not response:
             # NOTE(ivc): load balancer was present before 'create', but got
             # deleted externally between 'create' and 'find'
@@ -718,6 +723,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
     def ensure_member(self, loadbalancer, pool,
                       subnet_id, ip, port, target_ref_namespace,
                       target_ref_name, listener_port=None):
+        lbaas = clients.get_loadbalancer_client()
         name = ("%s/%s" % (target_ref_namespace, target_ref_name))
         name += ":%s" % port
         member = obj_lbaas.LBaaSMember(name=name,
@@ -728,7 +734,8 @@ class LBaaSv2Driver(base.LBaaSDriver):
                                        port=port)
         result = self._ensure_provisioned(loadbalancer, member,
                                           self._create_member,
-                                          self._find_member)
+                                          self._find_member,
+                                          update=lbaas.update_member)
 
         network_policy = (
             'policy' in CONF.kubernetes.enabled_handlers and
@@ -950,46 +957,70 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
     def _find_member(self, member):
         lbaas = clients.get_loadbalancer_client()
+        member = copy.deepcopy(member)
         response = lbaas.members(
             member.pool_id,
-            name=member.name,
             project_id=member.project_id,
             subnet_id=member.subnet_id,
             address=member.ip,
             protocol_port=member.port)
 
         try:
-            member.id = next(response).id
+            os_members = next(response)
+            member.id = os_members.id
+            member.name = os_members.name
         except (KeyError, StopIteration):
             return None
 
         return member
 
-    def _ensure(self, obj, create, find):
-        okay_codes = (409, 500)
+    def _ensure(self, obj, create, find, update=None):
         try:
             result = create(obj)
             LOG.debug("Created %(obj)s", {'obj': result})
             return result
         except o_exc.HttpException as e:
-            if e.status_code not in okay_codes:
+            if e.status_code not in OKAY_CODES:
                 raise
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code not in okay_codes:
+            if e.response.status_code not in OKAY_CODES:
                 raise
 
         result = find(obj)
+        # NOTE(maysams): A conflict may happen when a member is
+        # a lefover and a new pod uses the same address. Let's
+        # attempt to udpate the member name if already existent.
+        if result and obj.name != result.name and update:
+            update(result.id, obj.pool_id, name=obj.name)
+            result.name = obj.name
+        if result:
+            LOG.debug("Found %(obj)s", {'obj': result})
+        return result
+
+    def _ensure_loadbalancer(self, loadbalancer):
+        try:
+            result = self._create_loadbalancer(loadbalancer)
+            LOG.debug("Created %(obj)s", {'obj': result})
+            return result
+        except o_exc.HttpException as e:
+            if e.status_code not in OKAY_CODES:
+                raise
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code not in OKAY_CODES:
+                raise
+
+        result = self._find_loadbalancer(loadbalancer)
         if result:
             LOG.debug("Found %(obj)s", {'obj': result})
         return result
 
     def _ensure_provisioned(self, loadbalancer, obj, create, find,
-                            interval=_LB_STS_POLL_FAST_INTERVAL):
+                            interval=_LB_STS_POLL_FAST_INTERVAL, **kwargs):
         for remaining in self._provisioning_timer(_ACTIVATION_TIMEOUT,
                                                   interval):
             self._wait_for_provisioning(loadbalancer, remaining, interval)
             try:
-                result = self._ensure(obj, create, find)
+                result = self._ensure(obj, create, find, **kwargs)
                 if result:
                     return result
             except requests.exceptions.HTTPError as e:
