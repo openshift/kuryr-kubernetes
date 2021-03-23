@@ -1,8 +1,8 @@
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.8 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.16-openshift-4.8 AS builder
 
 WORKDIR /go/src/github.com/openshift/kuryr-kubernetes
 COPY . .
-RUN go build -o /go/bin/kuryr-cni ./kuryr_cni
+RUN GO111MODULE=off go build -o /go/bin/kuryr-cni ./kuryr_cni
 
 FROM registry.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.8
 
