@@ -49,9 +49,14 @@ _OCTAVIA_DL_VERSION = 2, 13
 _OCTAVIA_ACL_VERSION = 2, 12
 _OCTAVIA_PROVIDER_VERSION = 2, 6
 _OCTAVIA_SCTP_VERSION = 2, 23
+_OCTAVIA_VERSION_WITH_TIMEOUTS = 2, 1
+
 
 # HTTP Codes raised by Octavia when a Resource already exists
 OKAY_CODES = (409, 500)
+
+# Name of default Kubernetes Load-Balancer
+K8S_DEFAULT_SVC_NAME = 'default/kubernetes'
 
 
 class LBaaSv2Driver(base.LBaaSDriver):
@@ -92,6 +97,9 @@ class LBaaSv2Driver(base.LBaaSDriver):
         if v >= _OCTAVIA_SCTP_VERSION:
             LOG.info('Octavia API supports SCTP protocol.')
             self._octavia_sctp = True
+        if v >= _OCTAVIA_VERSION_WITH_TIMEOUTS:
+            LOG.info('Octavia API supports Listeners Timeout.')
+            self._octavia_timeouts = True
 
     def double_listeners_supported(self):
         return self._octavia_double_listeners
@@ -426,9 +434,21 @@ class LBaaSv2Driver(base.LBaaSDriver):
             'listener_id': listener['id'],
             'protocol': listener['protocol']
         }
-        return self._ensure_provisioned(loadbalancer, pool,
+        pool = self._ensure_provisioned(loadbalancer, pool,
                                         self._create_pool,
                                         self._find_pool)
+
+        if (pool and K8S_DEFAULT_SVC_NAME in pool['name'] and
+                loadbalancer['provider'] != 'ovn'):
+            if not self._wait_for_provisioning(
+                    loadbalancer, _ACTIVATION_TIMEOUT,
+                    _LB_STS_POLL_FAST_INTERVAL):
+                return
+            lbaas = clients.get_loadbalancer_client()
+            lbaas.create_health_monitor(
+                pool_id=pool['id'], type='TCP', timeout=10,
+                delay=10, max_retries=3, name=pool['name'])
+        return pool
 
     def ensure_pool_attached_to_lb(self, loadbalancer, namespace,
                                    svc_name, protocol):
@@ -528,19 +548,34 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
     def _find_loadbalancer(self, loadbalancer):
         lbaas = clients.get_loadbalancer_client()
-        response = lbaas.load_balancers(
-            name=loadbalancer['name'],
-            project_id=loadbalancer['project_id'],
-            vip_address=str(loadbalancer['ip']),
-            vip_subnet_id=loadbalancer['subnet_id'],
-            provider=loadbalancer['provider'])
+        request = {
+                'project_id': loadbalancer['project_id'],
+                'vip_address': str(loadbalancer['ip']),
+                'vip_subnet_id': loadbalancer['subnet_id']}
+
+        # NOTE(maysams): To make sure we find the api LB managed
+        # by CNO, we avoid including the name and provider fields
+        # and include them only when the resource was already
+        # managed by Kuryr.
+        if loadbalancer['name'] != K8S_DEFAULT_SVC_NAME:
+            request['name'] = loadbalancer['name']
+            request['provider'] = loadbalancer['provider']
+
+        response = lbaas.load_balancers(**request)
 
         try:
             os_lb = next(response)  # openstacksdk returns a generator
             loadbalancer['id'] = os_lb.id
             loadbalancer['port_id'] = self._get_vip_port(loadbalancer).id
             loadbalancer['provider'] = os_lb.provider
-            if os_lb.provisioning_status == 'ERROR':
+            # NOTE(maysams): the Load Balancer should be removed when
+            # has status ERROR or when an upgrade happened and the LB
+            # was previously handled by CNO, so it has different name than
+            # what is defined on CRD and resources are configured with
+            # different protocol.
+            if (os_lb.provisioning_status == 'ERROR' or
+                    (loadbalancer['name'] == K8S_DEFAULT_SVC_NAME and
+                        os_lb.name != K8S_DEFAULT_SVC_NAME)):
                 self.release_loadbalancer(loadbalancer)
                 utils.clean_lb_crd_status(loadbalancer['name'])
                 return None
@@ -559,10 +594,14 @@ class LBaaSv2Driver(base.LBaaSDriver):
         }
         timeout_cli = listener.get('timeout_client_data')
         timeout_mem = listener.get('timeout_member_data')
-        if timeout_cli:
-            request['timeout_client_data'] = timeout_cli
-        if timeout_mem:
-            request['timeout_member_data'] = timeout_mem
+        if self._octavia_timeouts:
+            if timeout_cli:
+                request['timeout_client_data'] = timeout_cli
+            if timeout_mem:
+                request['timeout_member_data'] = timeout_mem
+            if K8S_DEFAULT_SVC_NAME in listener['name']:
+                request['timeout_client_data'] = 600000
+                request['timeout_member_data'] = 600000
         self.add_tags('listener', request)
         lbaas = clients.get_loadbalancer_client()
         response = lbaas.create_listener(**request)
@@ -655,6 +694,7 @@ class LBaaSv2Driver(base.LBaaSDriver):
         lbaas = clients.get_loadbalancer_client()
         response = lbaas.create_pool(**request)
         pool['id'] = response.id
+
         return pool
 
     def _find_pool(self, pool, loadbalancer, by_listener=True):
