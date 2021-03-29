@@ -227,6 +227,9 @@ neutron_defaults = [
     cfg.IntOpt('network_device_mtu',
                help='Default MTU setting for network interface.',
                default=0,),
+    cfg.ListOpt('network_availability_zone',
+               help='Default AZs for networks created by Kuryr.',
+               default=[]),
     cfg.IntOpt('lbaas_activation_timeout',
                help=_("Time (in seconds) that kuryr controller waits for "
                       "neutron LBaaS to be activated"),
