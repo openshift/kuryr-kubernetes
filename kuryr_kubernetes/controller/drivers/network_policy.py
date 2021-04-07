@@ -520,8 +520,6 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                         continue
                     rule = driver_utils.create_security_group_rule_body(
                         direction,
-                        port_range_min=1,
-                        port_range_max=65535,
                         cidr=cidr,
                         namespace=namespace)
                     sg_rule_body_list.append(rule)
@@ -533,8 +531,6 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                     for ethertype in (constants.IPv4, constants.IPv6):
                         rule = driver_utils.create_security_group_rule_body(
                             direction,
-                            port_range_min=1,
-                            port_range_max=65535,
                             ethertype=ethertype)
                         sg_rule_body_list.append(rule)
                         if direction == 'egress':
