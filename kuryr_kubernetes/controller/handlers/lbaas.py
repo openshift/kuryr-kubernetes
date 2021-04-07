@@ -94,9 +94,6 @@ class ServiceHandler(k8s_base.ResourceEventHandler):
             return ('Skipping annotated service %s, waiting for it to be '
                     'converted to KuryrLoadBalancer object and annotation '
                     'removed.')
-        if utils.is_kubernetes_default_resource(service):
-            # Avoid to handle default Kubernetes service as requires https.
-            return 'Skipping default service %s.'
         return None
 
     def _patch_service_finalizer(self, service):
@@ -304,8 +301,7 @@ class EndpointsHandler(k8s_base.ResourceEventHandler):
         if (not (self._has_pods(endpoints) or (loadbalancer_crd and
                                                loadbalancer_crd.get('status')))
                 or k_const.K8S_ANNOTATION_HEADLESS_SERVICE
-                in endpoints['metadata'].get('labels', []) or
-                utils.is_kubernetes_default_resource(endpoints)):
+                in endpoints['metadata'].get('labels', [])):
             LOG.debug("Ignoring Kubernetes endpoints %s",
                       endpoints['metadata']['name'])
             return

@@ -264,7 +264,6 @@ class TestLBaaSv2Driver(test_base.TestCase):
     def test_ensure_pool(self):
         cls = d_lbaasv2.LBaaSv2Driver
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
-        expected_resp = mock.sentinel.expected_resp
         loadbalancer = {
             'project_id': 'TEST_PROJECT',
             'id': '00EE9E11-91C2-41CF-8FD4-7970579E5C4C',
@@ -274,7 +273,15 @@ class TestLBaaSv2Driver(test_base.TestCase):
             'name': 'TEST_LISTENER_NAME',
             'protocol': 'TCP',
         }
-        m_driver._ensure_provisioned.return_value = expected_resp
+        resp_pool = {
+            'name': 'TEST_NAME',
+            'project_id': 'TEST_PROJECT',
+            'loadbalancer_id': '00EE9E11-91C2-41CF-8FD4-7970579E5C4C',
+            'listener_id': 'A57B7771-6050-4CA8-A63C-443493EC98AB',
+            'protocol': 'TCP',
+            'id': 'D4F35594-27EB-4F4C-930C-31DD40F53B77'
+        }
+        m_driver._ensure_provisioned.return_value = resp_pool
 
         resp = cls.ensure_pool(m_driver, loadbalancer, listener)
 
@@ -286,7 +293,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
         self.assertEqual(loadbalancer['project_id'], pool['project_id'])
         self.assertEqual(listener['id'], pool['listener_id'])
         self.assertEqual(listener['protocol'], pool['protocol'])
-        self.assertEqual(expected_resp, resp)
+        self.assertEqual(resp_pool, resp)
 
     def test_release_pool(self):
         lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
@@ -553,6 +560,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
     def test_create_listener(self):
         cls = d_lbaasv2.LBaaSv2Driver
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
+        m_driver._octavia_timeouts = True
         lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
         listener = {
             'name': 'TEST_NAME',
@@ -580,6 +588,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
     def test_create_listener_with_different_timeouts(self):
         cls = d_lbaasv2.LBaaSv2Driver
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
+        m_driver._octavia_timeouts = True
         lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
         listener = {
             'name': 'TEST_NAME',

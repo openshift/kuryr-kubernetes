@@ -435,6 +435,17 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                     'pool_id']) in current_targets):
                 continue
 
+            # NOTE(maysams): The Endpoints object of kubernetes service is
+            #                unstable during installation, so to minimize
+            #                effect of this we're only removing node once
+            #                we're sure it's gone from the deployment. That's
+            #                done by looking for host-networking pods with
+            #                that IP.
+            if ('kubernetes' == lb_crd_name and
+                loadbalancer_crd['spec']['provider'] != 'ovn' and
+                    utils.get_pod_by_ip(member['ip'])):
+                continue
+
             self._drv_lbaas.release_member(loadbalancer_crd['status'][
                 'loadbalancer'], member)
             removed_ids.add(member['id'])

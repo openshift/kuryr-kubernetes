@@ -551,21 +551,6 @@ def clean_lb_crd_status(loadbalancer_name):
         raise
 
 
-def is_kubernetes_default_resource(obj):
-    """Check if Object is a resource associated to the API
-
-    Verifies if the Object is on the default namespace
-    and has the name kubernetes. Those name and namespace
-    are given to Kubernetes Service and Endpoints for the API.
-
-    :param obj: Kubernetes object dict
-    :returns: True if is default resource for the API, false
-              otherwise.
-    """
-    return (obj['metadata']['name'] == 'kubernetes' and
-            obj['metadata']['namespace'] == 'default')
-
-
 def get_pod_by_ip(pod_ip, namespace=None):
     k8s = clients.get_kubernetes_client()
     pod = {}
