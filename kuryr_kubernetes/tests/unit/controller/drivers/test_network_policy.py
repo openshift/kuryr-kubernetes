@@ -345,12 +345,8 @@ class TestNetworkPolicyDriver(test_base.TestCase):
         self._driver.parse_network_policy_rules(policy)
         m_get_namespaces.assert_called()
         m_get_resource_details.assert_called()
-        calls = [mock.call('ingress', port_range_min=1,
-                           port_range_max=65535, cidr=subnet_cidr,
-                           namespace=namespace),
-                 mock.call('egress', port_range_min=1,
-                           port_range_max=65535, cidr=subnet_cidr,
-                           namespace=namespace)]
+        calls = [mock.call('ingress', cidr=subnet_cidr, namespace=namespace),
+                 mock.call('egress', cidr=subnet_cidr, namespace=namespace)]
         m_create.assert_has_calls(calls)
 
     @mock.patch.object(network_policy.NetworkPolicyDriver, 'namespaced_pods')
