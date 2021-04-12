@@ -304,8 +304,8 @@ class TestKuryrPortHandler(test_base.TestCase):
     @mock.patch('kuryr_kubernetes.controller.drivers.vif_pool.MultiVIFPool.'
                 'activate_vif')
     @mock.patch('kuryr_kubernetes.clients.get_kubernetes_client')
-    @mock.patch('kuryr_kubernetes.controller.handlers.kuryrport.'
-                'KuryrPortHandler._is_network_policy_enabled')
+    @mock.patch('kuryr_kubernetes.controller.drivers.utils.'
+                'is_network_policy_enabled')
     @mock.patch('kuryr_kubernetes.controller.drivers.base.MultiVIFDriver.'
                 'get_enabled_drivers')
     def test_on_present_np(self, ged, is_np_enabled, get_k8s_client,
@@ -389,8 +389,8 @@ class TestKuryrPortHandler(test_base.TestCase):
                 'ServiceSecurityGroupsDriver.get_instance')
     @mock.patch('kuryr_kubernetes.controller.drivers.base.LBaaSDriver.'
                 'get_instance')
-    @mock.patch('kuryr_kubernetes.controller.handlers.kuryrport.'
-                'KuryrPortHandler._is_network_policy_enabled')
+    @mock.patch('kuryr_kubernetes.controller.drivers.utils.'
+                'is_network_policy_enabled')
     @mock.patch('kuryr_kubernetes.controller.drivers.vif_pool.MultiVIFPool.'
                 'release_vif')
     @mock.patch('kuryr_kubernetes.controller.drivers.default_security_groups.'
@@ -699,38 +699,6 @@ class TestKuryrPortHandler(test_base.TestCase):
                                                         'vif': vif1},
                                                'eth1': {'default': False,
                                                         'vif': vif2}}})
-
-    @mock.patch('kuryr_kubernetes.clients.get_kubernetes_client')
-    @mock.patch('kuryr_kubernetes.controller.drivers.base.MultiVIFDriver.'
-                'get_enabled_drivers')
-    def test_is_network_policy_enabled(self, ged, k8s):
-        ged.return_value = [self._driver]
-        kp = kuryrport.KuryrPortHandler()
-
-        CONF.set_override('enabled_handlers', ['fake_handler'],
-                          group='kubernetes')
-        CONF.set_override('service_security_groups_driver', 'foo',
-                          group='kubernetes')
-
-        self.assertFalse(kp._is_network_policy_enabled())
-
-        CONF.set_override('enabled_handlers', ['policy'],
-                          group='kubernetes')
-        CONF.set_override('service_security_groups_driver', 'foo',
-                          group='kubernetes')
-
-        self.assertFalse(kp._is_network_policy_enabled())
-
-        CONF.set_override('enabled_handlers', ['policy'],
-                          group='kubernetes')
-        self.addCleanup(CONF.clear_override, 'enabled_handlers',
-                        group='kubernetes')
-        CONF.set_override('service_security_groups_driver', 'policy',
-                          group='kubernetes')
-        self.addCleanup(CONF.clear_override, 'service_security_groups_driver',
-                        group='kubernetes')
-
-        self.assertTrue(kp._is_network_policy_enabled())
 
     @mock.patch('kuryr_kubernetes.controller.drivers.utils.'
                 'service_matches_affected_pods')
