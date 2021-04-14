@@ -663,6 +663,8 @@ class LBaaSv2Driver(base.LBaaSDriver):
                 LOG.debug("Releasing listener %s", os_listener.id)
                 self.release_listener(loadbalancer, listener)
                 return None
+            if not self._octavia_timeouts:
+                return listener
             if (timeout_cli and (
                     os_listener.timeout_client_data != timeout_cli)) or (
                         timeout_mb and (
