@@ -606,8 +606,10 @@ class LBaaSv2Driver(base.LBaaSDriver):
         lbaas = clients.get_loadbalancer_client()
         response = lbaas.create_listener(**request)
         listener['id'] = response.id
-        listener['timeout_client_data'] = response.timeout_client_data
-        listener['timeout_member_data'] = response.timeout_member_data
+        if timeout_cli:
+            listener['timeout_client_data'] = response.timeout_client_data
+        if timeout_mem:
+            listener['timeout_member_data'] = response.timeout_member_data
         return listener
 
     def _update_listener_acls(self, loadbalancer, listener_id, allowed_cidrs):
@@ -661,6 +663,8 @@ class LBaaSv2Driver(base.LBaaSDriver):
                 LOG.debug("Releasing listener %s", os_listener.id)
                 self.release_listener(loadbalancer, listener)
                 return None
+            if not self._octavia_timeouts:
+                return listener
             if (timeout_cli and (
                     os_listener.timeout_client_data != timeout_cli)) or (
                         timeout_mb and (

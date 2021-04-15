@@ -620,6 +620,7 @@ class TestLBaaSv2Driver(test_base.TestCase):
         lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
         cls = d_lbaasv2.LBaaSv2Driver
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
+        m_driver._octavia_timeouts = True
         loadbalancer = {
             'id': '00EE9E11-91C2-41CF-8FD4-7970579E5C4C',
         }
