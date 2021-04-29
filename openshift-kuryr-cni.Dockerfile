@@ -1,4 +1,4 @@
-FROM openshift/origin-release:golang-1.11 AS builder
+FROM openshift/origin-release:golang-1.15 AS builder
 
 WORKDIR /go/src/github.com/openshift/kuryr-kubernetes
 COPY . .
