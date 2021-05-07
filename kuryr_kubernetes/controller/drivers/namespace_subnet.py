@@ -159,9 +159,12 @@ class NamespacePodSubnetDriver(default_subnet.DefaultPodSubnetDriver):
             LOG.debug('Network does not exist. Creating.')
 
         mtu_cfg = oslo_cfg.CONF.neutron_defaults.network_device_mtu
+        azs = oslo_cfg.CONF.neutron_defaults.network_availability_zones
         attrs = {'name': net_name, 'project_id': project_id}
         if mtu_cfg:
             attrs['mtu'] = mtu_cfg
+        if azs:
+            attrs['availability_zone_hints'] = azs
         # create network with namespace as name
         try:
             neutron_net = os_net.create_network(**attrs)
