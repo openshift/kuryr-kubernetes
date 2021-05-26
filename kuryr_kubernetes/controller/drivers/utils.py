@@ -14,6 +14,7 @@
 #    under the License.
 
 import urllib
+import uuid
 
 import netaddr
 from openstack import exceptions as os_exc
@@ -336,7 +337,7 @@ def get_networkpolicies(namespace=None):
     try:
         if namespace:
             np_path = '{}/{}/networkpolicies'.format(
-                constants.K8S_API_CRD_NAMESPACES, namespace)
+                constants.K8S_API_NETWORKING_NAMESPACES, namespace)
         else:
             np_path = constants.K8S_API_POLICIES
         nps = kubernetes.get(np_path)
@@ -592,3 +593,40 @@ def get_port_annot_pci_info(nodename, neutron_port):
         LOG.exception('Exception when reading annotations '
                       '%s and converting from json', annot_name)
     return pci_info
+
+
+def bump_networkpolicy(knp):
+    kubernetes = clients.get_kubernetes_client()
+
+    try:
+        kubernetes.annotate(
+            knp['metadata']['annotations']['networkPolicyLink'],
+            {constants.K8S_ANNOTATION_POLICY: str(uuid.uuid4())})
+    except k_exc.K8sResourceNotFound:
+        raise
+    except k_exc.K8sClientException:
+        LOG.exception("Failed to annotate network policy %s to force its "
+                      "recalculation.", utils.get_res_unique_name(knp))
+        raise
+
+
+def bump_networkpolicies(namespace=None):
+    k8s = clients.get_kubernetes_client()
+    nps = get_networkpolicies(namespace)
+    for np in nps:
+        try:
+            k8s.annotate(np['metadata']['selfLink'],
+                         {constants.K8S_ANNOTATION_POLICY: str(uuid.uuid4())})
+        except k_exc.K8sResourceNotFound:
+            # Ignore if NP got deleted.
+            pass
+        except k_exc.K8sClientException:
+            LOG.warning("Failed to annotate network policy %s to force its "
+                        "recalculation.", utils.get_res_unique_name(np))
+            continue
+
+
+def is_network_policy_enabled():
+    enabled_handlers = CONF.kubernetes.enabled_handlers
+    svc_sg_driver = CONF.kubernetes.service_security_groups_driver
+    return 'policy' in enabled_handlers and svc_sg_driver == 'policy'

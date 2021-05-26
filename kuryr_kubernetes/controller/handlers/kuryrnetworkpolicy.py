@@ -216,7 +216,9 @@ class KuryrNetworkPolicyHandler(k8s_base.ResourceEventHandler):
                 #                 by the policy
                 # FIXME(dulek): Make sure to include svcs without selector when
                 #               we start supporting them.
-                if (not service['spec'].get('selector') or not
+                # NOTE(dulek): Skip services being deleted.
+                if (not service['spec'].get('selector') or
+                        service['metadata'].get('deletionTimestamp') or not
                         self._is_service_affected(service, pods_to_update)):
                     continue
                 sgs = self._drv_svc_sg.get_security_groups(service, project_id)
