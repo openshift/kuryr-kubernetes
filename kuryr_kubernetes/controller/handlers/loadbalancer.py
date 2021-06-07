@@ -54,7 +54,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
         # We need to set the requested load balancer provider
         # according to 'endpoints_driver_octavia_provider' configuration.
 
-    def on_present(self, loadbalancer_crd):
+    def on_present(self, loadbalancer_crd, *args, **kwargs):
         if loadbalancer_crd.get('status', None) is None:
 
             kubernetes = clients.get_kubernetes_client()
@@ -124,7 +124,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                    for endpoint in ep_slice.get('endpoints', [])
                    if endpoint['targetRef'].get('kind', []) == 'Pod')
 
-    def on_finalize(self, loadbalancer_crd):
+    def on_finalize(self, loadbalancer_crd, *args, **kwargs):
         LOG.debug("Deleting the loadbalancer CRD")
 
         if loadbalancer_crd['status'] != {}:
