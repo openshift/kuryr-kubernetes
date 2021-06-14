@@ -118,6 +118,10 @@ class LBaaSv2Driver(base.LBaaSDriver):
         # won't assume this dict is sorted.
         max_ver = 0, 0
         for version in versions:
+            # If the version of the load-balancer service endpoint is None.
+            if version['version'] is None:
+                LOG.debug("Skipping.. invalid version: %s", version['version'])
+                continue
             v_tuple = versionutils.convert_version_to_tuple(version['version'])
             if v_tuple > max_ver:
                 max_ver = v_tuple

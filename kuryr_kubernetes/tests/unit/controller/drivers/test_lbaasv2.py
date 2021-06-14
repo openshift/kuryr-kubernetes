@@ -44,6 +44,11 @@ OCTAVIA_VERSIONS = {
                 },
                 {
                     'status': 'SUPPORTED',
+                    'version': None,
+                    'raw_status': u'SUPPORTED',
+                },
+                {
+                    'status': 'SUPPORTED',
                     'version': '2.1',
                     'raw_status': u'SUPPORTED',
                 },
