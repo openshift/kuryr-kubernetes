@@ -20,8 +20,10 @@ import os_vif
 from os_vif.objects import vif as osv_objects
 from oslo_log import log as logging
 import pyroute2
+from pyroute2 import netns as pyroute_netns
 from stevedore import driver as stv_driver
 
+from kuryr_kubernetes.cni import utils as cni_utils
 from kuryr_kubernetes import config
 from kuryr_kubernetes import constants
 from kuryr_kubernetes import utils
@@ -81,14 +83,14 @@ def _enable_ipv6(netns):
         netns = utils.convert_netns(netns)
         path = utils.convert_netns('/proc/self/ns/net')
         self_ns_fd = open(path)
-        pyroute2.netns.setns(netns)
+        pyroute_netns.setns(netns)
         path = utils.convert_netns('/proc/sys/net/ipv6/conf/all/disable_ipv6')
         with open(path, 'w') as disable_ipv6:
             disable_ipv6.write('0')
     except Exception:
         raise
     finally:
-        pyroute2.netns.setns(self_ns_fd)
+        pyroute_netns.setns(self_ns_fd)
 
 
 def _configure_l3(vif, ifname, netns, is_default_gateway):
@@ -150,6 +152,7 @@ def _need_configure_l3(vif):
     return True
 
 
+@cni_utils.log_ipdb
 def connect(vif, instance_info, ifname, netns=None, report_health=None,
             is_default_gateway=True, container_id=None):
     driver = _get_binding_driver(vif)
@@ -161,6 +164,7 @@ def connect(vif, instance_info, ifname, netns=None, report_health=None,
         _configure_l3(vif, ifname, netns, is_default_gateway)
 
 
+@cni_utils.log_ipdb
 def disconnect(vif, instance_info, ifname, netns=None, report_health=None,
                container_id=None, **kwargs):
     driver = _get_binding_driver(vif)
@@ -170,6 +174,7 @@ def disconnect(vif, instance_info, ifname, netns=None, report_health=None,
     os_vif.unplug(vif, instance_info)
 
 
+@cni_utils.log_ipdb
 def cleanup(ifname, netns):
     with get_ipdb(netns) as c_ipdb:
         if ifname in c_ipdb.interfaces:
