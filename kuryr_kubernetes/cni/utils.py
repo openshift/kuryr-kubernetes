@@ -12,16 +12,20 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+import functools
 from http import client as httplib
 import time
+
+from oslo_log import log as logging
 
 PROC_ONE_CGROUP_PATH = '/proc/1/cgroup'
 CONTAINER_RUNTIME_CGROUP_IDS = (
     'docker',  # This is set by docker/moby
     'libpod',  # This is set by podman
 )
-
 SUCCESSFUL_REQUEST_CODE = (httplib.NO_CONTENT, httplib.ACCEPTED)
+
+LOG = logging.getLogger(__name__)
 
 
 def running_under_container_runtime(proc_one_cg_path=PROC_ONE_CGROUP_PATH):
@@ -84,3 +88,19 @@ def measure_time(command):
         wrapper.__name__ = method.__name__
         return wrapper
     return decorator
+
+
+def log_ipdb(func):
+    @functools.wraps(func)
+    def with_logging(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except RuntimeError as e:
+            try:
+                LOG.error('Error when manipulating network interfaces')
+                LOG.error(e.debug['traceback'])
+                LOG.debug('Full debugging info: %s', e.debug)
+            except AttributeError:
+                pass
+            raise
+    return with_logging

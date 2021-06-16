@@ -1,9 +1,9 @@
-FROM quay.io/kuryr/golang:1.15 as builder
+FROM quay.io/kuryr/golang:1.16 as builder
 
 WORKDIR /go/src/opendev.com/kuryr-kubernetes
 COPY . .
-# FIXME(dulek): I guess we need to switch to modules anyway.
-RUN GO111MODULE=off go build -o /go/bin/kuryr-cni ./kuryr_cni
+
+RUN GO111MODULE=auto go build -o /go/bin/kuryr-cni ./kuryr_cni/pkg/*
 
 FROM registry.centos.org/centos:8
 LABEL authors="Antoni Segura Puimedon<toni@kuryr.org>, Michał Dulko<mdulko@redhat.com>"
