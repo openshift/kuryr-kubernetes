@@ -55,6 +55,18 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
         # according to 'endpoints_driver_octavia_provider' configuration.
 
     def on_present(self, loadbalancer_crd):
+        if loadbalancer_crd.get('status', None) is None:
+
+            kubernetes = clients.get_kubernetes_client()
+            try:
+                kubernetes.patch_crd('status',
+                                     loadbalancer_crd['metadata']['selfLink'],
+                                     {})
+            except k_exc.K8sResourceNotFound:
+                LOG.debug('KuryrLoadbalancer CRD not found %s',
+                          utils.get_res_unique_name(loadbalancer_crd))
+            return
+
         if self._should_ignore(loadbalancer_crd):
             LOG.debug("Ignoring Kubernetes service %s",
                       loadbalancer_crd['metadata']['name'])
@@ -97,18 +109,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                     loadbalancer_crd['status'][
                         'service_pub_ip_info'] = service_pub_ip_info
                     self._update_lb_status(loadbalancer_crd)
-                    kubernetes = clients.get_kubernetes_client()
-                    try:
-                        kubernetes.patch_crd('status', loadbalancer_crd[
-                            'metadata']['selfLink'], loadbalancer_crd[
-                                'status'])
-                    except k_exc.K8sResourceNotFound:
-                        LOG.debug('KuryrLoadbalancer CRD not found %s',
-                                  loadbalancer_crd)
-                    except k_exc.K8sClientException:
-                        LOG.exception('Error updating KuryLoadbalancer CRD %s',
-                                      loadbalancer_crd)
-                        raise
+                    self._patch_status(loadbalancer_crd)
 
     def _should_ignore(self, loadbalancer_crd):
         return not(self._has_pods(loadbalancer_crd) or
@@ -169,6 +170,25 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                           'for %s', service["metadata"]["name"])
             raise
 
+    def _patch_status(self, loadbalancer_crd):
+        kubernetes = clients.get_kubernetes_client()
+        try:
+            kubernetes.patch_crd(
+                'status', loadbalancer_crd['metadata']['selfLink'],
+                loadbalancer_crd['status'])
+        except k_exc.K8sResourceNotFound:
+            LOG.debug('KuryrLoadBalancer CRD not found %s', loadbalancer_crd)
+            return False
+        except k_exc.K8sUnprocessableEntity:
+            LOG.warning('KuryrLoadBalancer %s modified, retrying later.',
+                        utils.get_res_unique_name(loadbalancer_crd))
+            return False
+        except k_exc.K8sClientException:
+            LOG.exception('Error updating KuryLoadbalancer CRD %s',
+                          loadbalancer_crd)
+            raise
+        return True
+
     def _sync_lbaas_members(self, loadbalancer_crd):
         changed = False
 
@@ -216,8 +236,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                       'due to missing loadbalancer field.')
             return None
         except k_exc.K8sClientException:
-            LOG.exception('Error syncing KuryrLoadBalancer'
-                          ' %s', svc_name)
+            LOG.exception('Error syncing KuryrLoadBalancer %s', svc_name)
             raise
         return klb_crd
 
@@ -326,18 +345,8 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                         loadbalancer_crd['status']['members'] = []
                         loadbalancer_crd['status'].get('members', []).append(
                             member)
-                    kubernetes = clients.get_kubernetes_client()
-                    try:
-                        kubernetes.patch_crd('status', loadbalancer_crd[
-                            'metadata']['selfLink'], loadbalancer_crd[
-                                'status'])
-                    except k_exc.K8sResourceNotFound:
-                        LOG.debug('KuryrLoadbalancer CRD not found %s',
-                                  loadbalancer_crd)
-                    except k_exc.K8sClientException:
-                        LOG.exception('Error updating KuryLoadbalancer CRD %s',
-                                      loadbalancer_crd)
-                        raise
+                    if not self._patch_status(loadbalancer_crd):
+                        return False
                     changed = True
         return changed
 
@@ -409,25 +418,12 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
             removed_ids.add(member['id'])
 
         if removed_ids:
-            loadbalancer_crd['status']['members'] = [m for m in
-                                                     loadbalancer_crd[
-                                                         'status'][
-                                                             'members']
-                                                     if m['id'] not in
-                                                     removed_ids]
+            members = [m for m in loadbalancer_crd['status'].get('members', [])
+                       if m['id'] not in removed_ids]
+            loadbalancer_crd['status']['members'] = members
 
-            kubernetes = clients.get_kubernetes_client()
-            try:
-                kubernetes.patch_crd('status', loadbalancer_crd[
-                    'metadata']['selfLink'], loadbalancer_crd[
-                        'status'])
-            except k_exc.K8sResourceNotFound:
-                LOG.debug('KuryrLoadbalancer CRD not found %s',
-                          loadbalancer_crd)
-            except k_exc.K8sClientException:
-                LOG.exception('Error updating KuryLoadbalancer CRD %s',
-                              loadbalancer_crd)
-                raise
+            if not self._patch_status(loadbalancer_crd):
+                return False
         return bool(removed_ids)
 
     def _sync_lbaas_pools(self, loadbalancer_crd):
@@ -465,17 +461,9 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                 loadbalancer_crd['status']['pools'] = []
                 loadbalancer_crd['status'].get('pools', []).append(
                     pool)
-            kubernetes = clients.get_kubernetes_client()
-            try:
-                kubernetes.patch_crd('status', loadbalancer_crd['metadata'][
-                    'selfLink'], loadbalancer_crd['status'])
-            except k_exc.K8sResourceNotFound:
-                LOG.debug('KuryrLoadbalancer CRD not found %s',
-                          loadbalancer_crd)
-            except k_exc.K8sClientException:
-                LOG.exception('Error updating KuryrLoadbalancer CRD %s',
-                              loadbalancer_crd)
-                raise
+
+            if not self._patch_status(loadbalancer_crd):
+                return False
             changed = True
         return changed
 
@@ -512,18 +500,8 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                                                      if m['pool_id'] not in
                                                      removed_ids]
 
-            kubernetes = clients.get_kubernetes_client()
-            try:
-                kubernetes.patch_crd('status', loadbalancer_crd[
-                    'metadata']['selfLink'], loadbalancer_crd[
-                        'status'])
-            except k_exc.K8sResourceNotFound:
-                LOG.debug('KuryrLoadbalancer CRD not found %s',
-                          loadbalancer_crd)
-            except k_exc.K8sClientException:
-                LOG.exception('Error updating KuryLoadbalancer CRD %s',
-                              loadbalancer_crd)
-                raise
+            if not self._patch_status(loadbalancer_crd):
+                return False
         return bool(removed_ids)
 
     def _sync_lbaas_listeners(self, loadbalancer_crd):
@@ -584,17 +562,8 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                     loadbalancer_crd['status'].get('listeners', []).append(
                         listener)
 
-                kubernetes = clients.get_kubernetes_client()
-                try:
-                    kubernetes.patch_crd('status', loadbalancer_crd[
-                        'metadata']['selfLink'], loadbalancer_crd['status'])
-                except k_exc.K8sResourceNotFound:
-                    LOG.debug('KuryrLoadbalancer CRD not found %s',
-                              loadbalancer_crd)
-                except k_exc.K8sClientException:
-                    LOG.exception('Error updating KuryrLoadbalancer CRD %s',
-                                  loadbalancer_crd)
-                    raise
+                if not self._patch_status(loadbalancer_crd):
+                    return False
                 changed = True
         return changed
 
@@ -614,18 +583,8 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                                                           []) if l['id']
                 not in removed_ids]
 
-            kubernetes = clients.get_kubernetes_client()
-            try:
-                kubernetes.patch_crd('status', loadbalancer_crd[
-                    'metadata']['selfLink'], loadbalancer_crd[
-                        'status'])
-            except k_exc.K8sResourceNotFound:
-                LOG.debug('KuryrLoadbalancer CRD not found %s',
-                          loadbalancer_crd)
-            except k_exc.K8sClientException:
-                LOG.exception('Error updating KuryLoadbalancer CRD %s',
-                              loadbalancer_crd)
-                raise
+            if not self._patch_status(loadbalancer_crd):
+                return False
         return bool(removed_ids)
 
     def _update_lb_status(self, lb_crd):
@@ -649,7 +608,6 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
             raise
 
     def _sync_lbaas_loadbalancer(self, loadbalancer_crd):
-        changed = False
         lb = loadbalancer_crd['status'].get('loadbalancer')
 
         if lb and lb['ip'] != loadbalancer_crd['spec'].get('ip'):
@@ -688,20 +646,8 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                     provider=loadbalancer_crd['spec'].get('provider'))
                 loadbalancer_crd['status']['loadbalancer'] = lb
 
-            kubernetes = clients.get_kubernetes_client()
-            try:
-                kubernetes.patch_crd('status', loadbalancer_crd['metadata'][
-                    'selfLink'], loadbalancer_crd['status'])
-            except k_exc.K8sResourceNotFound:
-                LOG.debug('KuryrLoadbalancer CRD not found %s',
-                          loadbalancer_crd)
-            except k_exc.K8sClientException:
-                LOG.exception('Error updating KuryrLoadbalancer CRD %s',
-                              loadbalancer_crd)
-                raise
-            changed = True
-
-        return changed
+            return self._patch_status(loadbalancer_crd)
+        return False
 
     def _ensure_release_lbaas(self, loadbalancer_crd):
         attempts = 0
@@ -730,17 +676,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                 retry = True
 
             loadbalancer_crd['status'] = {}
-            k8s = clients.get_kubernetes_client()
-            try:
-                k8s.patch_crd('status', loadbalancer_crd['metadata'][
-                    'selfLink'], loadbalancer_crd['status'])
-            except k_exc.K8sResourceNotFound:
-                LOG.debug('KuryrLoadbalancer CRD not found %s',
-                          loadbalancer_crd)
-            except k_exc.K8sClientException:
-                LOG.exception('Error updating KuryrLoadbalancer CRD %s',
-                              loadbalancer_crd)
-                raise
+            self._patch_status(loadbalancer_crd)
             # NOTE(ltomasbo): give some extra time to ensure the Load
             # Balancer VIP is also released
             time.sleep(1)
