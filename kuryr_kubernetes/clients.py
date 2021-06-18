@@ -17,6 +17,7 @@ from functools import partial
 import ipaddress
 import os
 
+from keystoneauth1 import session as k_session
 from kuryr.lib import utils
 from openstack import connection
 from openstack import exceptions as os_exc
@@ -154,6 +155,10 @@ def handle_neutron_errors(method, *args, **kwargs):
 def setup_openstacksdk():
     auth_plugin = utils.get_auth_plugin('neutron')
     session = utils.get_keystone_session('neutron', auth_plugin)
+    for scheme in list(session.session.adapters):
+        session.session.mount(scheme, k_session.TCPKeepAliveAdapter(
+            pool_maxsize=1000))
+
     # TODO(mdulko): To use Neutron's ability to do compare-and-swap updates we
     #               need to manually add support for inserting If-Match header
     #               into requests. At the moment we only need it for ports.
