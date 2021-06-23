@@ -61,13 +61,15 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
                                 .get_instance())
         self.k8s = clients.get_kubernetes_client()
 
-    def on_present(self, kuryrport_crd):
+    def on_present(self, kuryrport_crd, *args, **kwargs):
         if not kuryrport_crd['status']['vifs']:
             # Get vifs
             if not self.get_vifs(kuryrport_crd):
                 # Ignore this event, according to one of the cases logged in
                 # get_vifs method.
                 return
+
+        retry_info = kwargs.get('retry_info')
 
         vifs = {ifname: {'default': data['default'],
                          'vif': objects.base.VersionedObject
@@ -78,6 +80,7 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
             return
 
         changed = False
+        pod = self._get_pod(kuryrport_crd)
 
         try:
             for ifname, data in vifs.items():
@@ -89,22 +92,14 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
                     driver_utils.update_port_pci_info(pod_node, data['vif'])
                 if not data['vif'].active:
                     try:
-                        self._drv_vif_pool.activate_vif(data['vif'])
+                        self._drv_vif_pool.activate_vif(data['vif'], pod=pod,
+                                                        retry_info=retry_info)
                         changed = True
                     except os_exc.ResourceNotFound:
                         LOG.debug("Port not found, possibly already deleted. "
                                   "No need to activate it")
         finally:
             if changed:
-                try:
-                    name = kuryrport_crd['metadata']['name']
-                    namespace = kuryrport_crd['metadata']['namespace']
-                    pod = self.k8s.get(f"{constants.K8S_API_NAMESPACES}"
-                                       f"/{namespace}/pods/{name}")
-                except k_exc.K8sResourceNotFound as ex:
-                    LOG.exception("Failed to get pod: %s", ex)
-                    raise
-
                 project_id = self._drv_project.get_project(pod)
 
                 try:
@@ -122,7 +117,8 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
                 try:
                     self._record_pod_creation_metric(pod)
                 except Exception:
-                    LOG.debug("Failed to record metric for pod %s", name)
+                    LOG.debug("Failed to record metric for pod %s",
+                              pod['metadata']['name'])
 
                 if driver_utils.is_network_policy_enabled():
                     crd_pod_selectors = self._drv_sg.create_sg_rules(pod)
@@ -131,7 +127,7 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
                         self._update_services(services, crd_pod_selectors,
                                               project_id)
 
-    def on_finalize(self, kuryrport_crd):
+    def on_finalize(self, kuryrport_crd, *args, **kwargs):
         name = kuryrport_crd['metadata']['name']
         namespace = kuryrport_crd['metadata']['namespace']
         try:
@@ -304,3 +300,13 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
                 pod_creation_time = datetime.datetime.now() - time_obj
                 pod_creation_sec = (pod_creation_time).total_seconds()
                 exporter.record_pod_creation_metric(pod_creation_sec)
+
+    def _get_pod(self, kuryrport_crd):
+        try:
+            name = kuryrport_crd['metadata']['name']
+            namespace = kuryrport_crd['metadata']['namespace']
+            return self.k8s.get(f"{constants.K8S_API_NAMESPACES}"
+                                f"/{namespace}/pods/{name}")
+        except k_exc.K8sResourceNotFound as ex:
+            LOG.exception("Failed to get pod: %s", ex)
+            raise
