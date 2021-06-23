@@ -42,6 +42,14 @@ def gather_network_data(os_net, project_id):
 def gather_loadbalancer_data(lbaas, project_id):
     print("Load Balancers:")
     pprint(list(lbaas.load_balancers()))
+    print("Listeners:")
+    pprint(list(lbaas.listeners()))
+    print("Pools:")
+    pools = list(lbaas.pools())
+    pprint(pools)
+    for pool in pools:
+        print(f"Pool {pool.id} members:")
+        pprint(list(lbaas.members(pool.id)))
     print("Load Balancer quota:")
     pprint(lbaas.get_quota(quota=project_id))
 
