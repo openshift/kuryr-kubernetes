@@ -65,7 +65,7 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                 except k_exc.K8sResourceNotFound:
                     pass
 
-    def on_present(self, pod):
+    def on_present(self, pod, *args, **kwargs):
         if (driver_utils.is_host_network(pod) or
                 not self._is_pod_scheduled(pod)):
             # REVISIT(ivc): consider an additional configurable check that
@@ -118,7 +118,7 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                               "KuryrPort CRD: %s", ex)
                 raise k_exc.ResourceNotReady(pod)
 
-    def on_finalize(self, pod):
+    def on_finalize(self, pod, *args, **kwargs):
         k8s = clients.get_kubernetes_client()
 
         try:

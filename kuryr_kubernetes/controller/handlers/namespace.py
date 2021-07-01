@@ -71,7 +71,7 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
             except exceptions.K8sResourceNotFound:
                 LOG.debug('Kuryrnet object already deleted: %s', net_crd)
 
-    def on_present(self, namespace):
+    def on_present(self, namespace, *args, **kwargs):
         ns_labels = namespace['metadata'].get('labels', {})
         ns_name = namespace['metadata']['name']
         kns_crd = self._get_kns_crd(ns_name)

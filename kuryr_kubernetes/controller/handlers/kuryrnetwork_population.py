@@ -42,7 +42,7 @@ class KuryrNetworkPopulationHandler(k8s_base.ResourceEventHandler):
             specific_driver='multi_pool')
         self._drv_vif_pool.set_vif_driver()
 
-    def on_present(self, kuryrnet_crd):
+    def on_present(self, kuryrnet_crd, *args, **kwargs):
         subnet_id = kuryrnet_crd.get('status', {}).get('subnetId')
         if not subnet_id:
             LOG.debug("No Subnet present for KuryrNetwork %s",
