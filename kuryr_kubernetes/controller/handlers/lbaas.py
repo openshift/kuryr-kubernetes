@@ -344,6 +344,8 @@ class EndpointsHandler(k8s_base.ResourceEventHandler):
             status = {}
         if not spec:
             spec = {'endpointSlices': epslices}
+        else:
+            spec['endpointSlices'] = epslices
 
         # NOTE(maysams): As the spec may already contain a
         # ports field from the Service, a new endpointslice
