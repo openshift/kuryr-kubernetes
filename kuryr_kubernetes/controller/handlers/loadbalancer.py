@@ -389,7 +389,7 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                     port['name'] = None
                 spec_ports[port['name']] = pool['id']
 
-        ep_slices = loadbalancer_crd['spec'].get('endpointSlices')
+        ep_slices = loadbalancer_crd['spec'].get('endpointSlices', [])
         # NOTE(maysams): As we don't support dual-stack, we assume
         # only one address is possible on the addresses field.
         current_targets = [(ep['addresses'][0],
