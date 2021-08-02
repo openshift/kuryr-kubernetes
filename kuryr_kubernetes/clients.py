@@ -13,7 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from functools import partial
+# from functools import partial
 import ipaddress
 import os
 
@@ -26,6 +26,7 @@ from openstack.network.v2 import port as os_port
 from openstack.network.v2 import trunk as os_trunk
 from openstack import resource as os_resource
 from openstack import utils as os_utils
+from oslo_log import log as logging
 
 from kuryr_kubernetes import config
 from kuryr_kubernetes import k8s_client
@@ -36,6 +37,8 @@ _NEUTRON_CLIENT = 'neutron-client'
 _KUBERNETES_CLIENT = 'kubernetes-client'
 _OPENSTACKSDK = 'openstacksdk'
 _POD_RESOURCES_CLIENT = 'pod-resources-client'
+
+LOG = logging.getLogger(__name__)
 
 
 def get_network_client():
@@ -162,6 +165,17 @@ def setup_openstacksdk():
     for scheme in list(session.session.adapters):
         session.session.mount(scheme, k_session.TCPKeepAliveAdapter(
             pool_maxsize=1000))
+
+    LOG.warning("#########################")
+    LOG.warning(os.environ.get('HTTPS_PROXY'))
+    LOG.warning(os.environ.get('HTTP_PROXY'))
+    LOG.warning(session.session.proxies)
+    proxies = {
+        'https': os.environ.get('HTTPS_PROXY'),
+        'http': os.environ.get('HTTP_PROXY'),
+    }
+    session.session.proxies = proxies
+    LOG.warning(session.session.proxies)
 
     # TODO(mdulko): To use Neutron's ability to do compare-and-swap updates we
     #               need to manually add support for inserting If-Match header

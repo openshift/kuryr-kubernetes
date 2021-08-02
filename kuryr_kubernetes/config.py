@@ -203,6 +203,9 @@ k8s_opts = [
                help=_("The prefix to use for additional vifs created by "
                       " multi_vif drivers"),
                default='eth'),
+    cfg.StrOpt('proxy',
+               help=_("The root URL of the Kubernetes API"),
+               default=""),
 ]
 
 neutron_defaults = [
