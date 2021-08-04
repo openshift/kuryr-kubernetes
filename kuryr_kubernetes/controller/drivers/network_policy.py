@@ -587,7 +587,8 @@ class NetworkPolicyDriver(base.NetworkPolicyDriver):
                 if allowed_cidrs:
                     for cidr in allowed_cidrs:
                         rule = _create_sg_rule_body(direction, cidr=cidr)
-                        sg_rule_body_list.append(rule)
+                        if rule not in sg_rule_body_list:
+                            sg_rule_body_list.append(rule)
                         if direction == 'egress':
                             self._create_svc_egress_sg_rule(policy_namespace,
                                                             sg_rule_body_list)
