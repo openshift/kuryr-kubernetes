@@ -28,6 +28,13 @@ class ResourceNotReady(Exception):
                                                % resource)
 
 
+class LoadBalancerRemoved(Exception):
+    def __init__(self, loadbalancer, state):
+        self.id = loadbalancer.id
+        self.name = loadbalancer.name
+        self.state = state
+
+
 class K8sResourceNotFound(K8sClientException):
     def __init__(self, resource):
         super(K8sResourceNotFound, self).__init__("Resource not "
