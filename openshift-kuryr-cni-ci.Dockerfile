@@ -14,13 +14,11 @@ ARG OSLO_LOCK_PATH=/var/kuryr-lock
 RUN sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/built.repo
 
 # FIXME(dulek): Until I'll figure out how to get OpenStack repos here, we need this hack.
-RUN yum install --setopt=tsflags=nodocs -y \
-    https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
-    && printf '[openstack-stein]\n\
-name=OpenStack Stein Repository\n\
-baseurl=http://mirror.centos.org/centos/7/cloud/$basearch/openstack-stein/\n\
+RUN printf '[openstack-rocky]\n\
+name=OpenStack Rocky Repository\n\
+baseurl=http://mirror.centos.org/centos/7/cloud/$basearch/openstack-rocky/\n\
 gpgcheck=0\n\
-enabled=1\n' >> /etc/yum.repos.d/rdo-stein.repo
+enabled=1\n' >> /etc/yum.repos.d/rdo-rocky.repo
 
 COPY --from=builder /go/bin/kuryr-cni /kuryr-cni
 
