@@ -475,7 +475,30 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
         else:
             for port in existing_ports:
                 if not port.binding_host_id:
-                    os_net.delete_port(port.id)
+                    try:
+                        os_net.delete_port(port.id)
+                    except os_exc.SDKException as e:
+                        if "currently a subport for trunk" in str(e):
+                            if port.status == "DOWN":
+                                LOG.warning(
+                                    "Port %s is in DOWN status but still "
+                                    "associated to a trunk. This should "
+                                    "not happen. Trying to delete it from "
+                                    "the trunk.", port.id)
+                            # Get the trunk_id from the error message
+                            trunk_id = (
+                                str(e).split('trunk')[1].split('.')[0].strip())
+                            try:
+                                os_net.delete_trunk_subports(
+                                    trunk_id, [{'port_id': port.id}])
+                            except os_exc.NotFoundException:
+                                LOG.debug(
+                                    "Port %s already removed from trunk %s",
+                                    port['id'], trunk_id)
+                        else:
+                            LOG.exception("Unexpected error deleting leftover "
+                                          "port %s. Skiping it and continue with "
+                                          "the other rest.", port.id)
 
     def _cleanup_removed_nodes(self):
         """Remove ports associated to removed nodes."""
