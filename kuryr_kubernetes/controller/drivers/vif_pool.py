@@ -454,7 +454,7 @@ class BaseVIFPool(base.VIFPoolDriver):
         else:
             for port in existing_ports:
                 if not port.get('binding:host_id'):
-                    neutron.delete_port(port['id'])
+                    c_utils.delete_port(port)
 
 
 class NeutronVIFPool(BaseVIFPool):
