@@ -212,11 +212,10 @@ class VIFHandler(k8s_base.ResourceEventHandler):
 
     @MEMOIZE
     def is_ready(self, quota):
-        neutron = clients.get_neutron_client()
-        port_quota = quota['port']
-        port_func = neutron.list_ports
-        if utils.has_limit(port_quota):
-            return utils.is_available('ports', port_quota, port_func)
+        if (utils.has_limit(quota.ports) and
+                not utils.is_available('ports', quota.ports)):
+            LOG.error('Marking VIFHandler as not ready.')
+            return False
         return True
 
     @staticmethod

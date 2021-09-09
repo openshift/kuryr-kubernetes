@@ -42,6 +42,10 @@ def get_loadbalancer_client():
     return get_openstacksdk().load_balancer
 
 
+def get_network_client():
+    return get_openstacksdk().network
+
+
 def get_kubernetes_client():
     return _clients[_KUBERNETES_CLIENT]
 
