@@ -551,7 +551,7 @@ class NeutronVIFPool(test_base.TestCase):
             pool_key: {tuple(security_groups): collections.deque([])}}
         m_driver._last_update = {pool_key: {tuple(security_groups): 1}}
 
-        self.assertRaises(exceptions.ResourceNotReady, cls._get_port_from_pool,
+        self.assertRaises(exceptions.VIFPoolEmpty, cls._get_port_from_pool,
                           m_driver, pool_key, pod, subnets,
                           tuple(security_groups))
 
@@ -1095,7 +1095,7 @@ class NestedVIFPool(test_base.TestCase):
             pool_key: {tuple(security_groups): collections.deque([])}}
         m_driver._last_update = {pool_key: {tuple(security_groups): 1}}
 
-        self.assertRaises(exceptions.ResourceNotReady, cls._get_port_from_pool,
+        self.assertRaises(exceptions.VIFPoolEmpty, cls._get_port_from_pool,
                           m_driver, pool_key, pod, subnets, tuple(
                               security_groups))
 

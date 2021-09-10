@@ -22,6 +22,18 @@ class IntegrityError(RuntimeError):
     pass
 
 
+class VIFPoolNotReady(Exception):
+    def __init__(self, resource):
+        super(VIFPoolNotReady, self).__init__("VIF Pool not ready %s: " %
+                                              (resource,))
+
+
+class VIFPoolEmpty(Exception):
+    def __init__(self, resource):
+        super(VIFPoolEmpty, self).__init__("VIF Pool empty %s: " %
+                                           (resource,))
+
+
 class ResourceNotReady(Exception):
     def __init__(self, resource):
         super(ResourceNotReady, self).__init__("Resource not ready: %r"

@@ -204,8 +204,13 @@ class BaseVIFPool(base.VIFPoolDriver):
                                             tuple(sorted(security_groups)))
         except exceptions.ResourceNotReady:
             LOG.warning("Ports pool does not have available ports!")
-            eventlet.spawn(self._populate_pool, pool_key, pod, subnets,
-                           tuple(sorted(security_groups)))
+            gt = eventlet.spawn(self._populate_pool, pool_key, pod,
+                                subnets, tuple(sorted(security_groups)))
+            try:
+                gt.wait()
+            except (n_exc.OverQuotaClient,
+                    n_exc.IpAddressGenerationFailureClient):
+                raise
             raise
 
     def _get_port_from_pool(self, pool_key, pod, subnets, security_groups):
@@ -467,7 +472,7 @@ class NeutronVIFPool(BaseVIFPool):
         try:
             pool_ports = self._available_ports_pools[pool_key]
         except (KeyError, AttributeError):
-            raise exceptions.ResourceNotReady(pod)
+            raise exceptions.VIFPoolNotReady(pool_key)
         try:
             port_id = pool_ports[security_groups].pop()
         except (KeyError, IndexError):
@@ -492,7 +497,7 @@ class NeutronVIFPool(BaseVIFPool):
                             min_sg_group = sg_group
                 if min_date == -1:
                     # pool is empty, no port to reuse
-                    raise exceptions.ResourceNotReady(pod)
+                    raise exceptions.VIFPoolEmpty(pool_key)
                 port_id = pool_ports[min_sg_group].pop()
             neutron = clients.get_neutron_client()
             neutron.update_port(
@@ -730,7 +735,7 @@ class NestedVIFPool(BaseVIFPool):
         try:
             pool_ports = self._available_ports_pools[pool_key]
         except (KeyError, AttributeError):
-            raise exceptions.ResourceNotReady(pod)
+            raise exceptions.VIFPoolNotReady(pool_key)
         try:
             port_id = pool_ports[security_groups].pop()
         except (KeyError, IndexError):
@@ -755,7 +760,7 @@ class NestedVIFPool(BaseVIFPool):
                             min_sg_group = sg_group
                 if min_date == -1:
                     # pool is empty, no port to reuse
-                    raise exceptions.ResourceNotReady(pod)
+                    raise exceptions.VIFPoolEmpty(pool_key)
                 port_id = pool_ports[min_sg_group].pop()
             neutron = clients.get_neutron_client()
             neutron.update_port(
