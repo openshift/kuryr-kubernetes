@@ -77,8 +77,10 @@ class Retry(base.EventHandler):
             try:
                 self._handler(event)
                 break
-            except (n_exc.OverQuotaClient, exceptions.LoadBalancerNotReady,
-                    exceptions.PortNotReady):
+            except (n_exc.OverQuotaClient,
+                    n_exc.IpAddressGenerationFailureClient,
+                    exceptions.LoadBalancerNotReady, exceptions.PortNotReady,
+                    exceptions.VIFPoolNotReady):
                 with excutils.save_and_reraise_exception() as ex:
                     if self._sleep(deadline, attempt, ex.value):
                         ex.reraise = False

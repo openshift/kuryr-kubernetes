@@ -52,6 +52,15 @@ class PortNotReady(ResourceNotReady):
             'Please contact your OpenStack administrator.' % (port_id, status))
 
 
+class VIFPoolNotReady(ResourceNotReady):
+    def __init__(self, host, project_id, net_id):
+        super(VIFPoolNotReady, self).__init__(
+            'Kuryr timed out trying to create ports for host %s in network '
+            '%s. This might indicate running out of port quota in Neutron or '
+            'that the aforementioned network has no more IPs available.'
+            % (host, net_id))
+
+
 class K8sResourceNotFound(K8sClientException):
     def __init__(self, resource):
         super(K8sResourceNotFound, self).__init__("Resource not "
