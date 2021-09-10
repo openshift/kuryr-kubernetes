@@ -154,7 +154,7 @@ class BaseVIFPool(test_base.TestCase):
         subnets = {subnet_id: network}
         security_groups = [mock.sentinel.security_groups]
         m_driver._get_port_from_pool.side_effect = (
-            exceptions.ResourceNotReady(pod))
+            exceptions.VIFPoolNotReady(host_addr, project_id, net_id))
 
         self.assertRaises(exceptions.ResourceNotReady, cls.request_vif,
                           m_driver, pod, project_id, subnets, security_groups)
@@ -543,7 +543,8 @@ class NeutronVIFPool(test_base.TestCase):
         neutron = self.useFixture(k_fix.MockNeutronClient()).client
 
         pod = get_pod_obj()
-        pool_key = mock.sentinel.pool_key
+        pool_key = (mock.sentinel.host, mock.sentinel.project_id,
+                    mock.sentinel.net_id)
         subnets = mock.sentinel.subnets
         security_groups = 'test-sg'
 
@@ -551,7 +552,7 @@ class NeutronVIFPool(test_base.TestCase):
             pool_key: {tuple(security_groups): collections.deque([])}}
         m_driver._last_update = {pool_key: {tuple(security_groups): 1}}
 
-        self.assertRaises(exceptions.ResourceNotReady, cls._get_port_from_pool,
+        self.assertRaises(exceptions.VIFPoolNotReady, cls._get_port_from_pool,
                           m_driver, pool_key, pod, subnets,
                           tuple(security_groups))
 
@@ -1087,7 +1088,8 @@ class NestedVIFPool(test_base.TestCase):
         neutron = self.useFixture(k_fix.MockNeutronClient()).client
 
         pod = mock.sentinel.pod
-        pool_key = mock.sentinel.pool_key
+        pool_key = (mock.sentinel.host, mock.sentinel.project_id,
+                    mock.sentinel.net_id)
         subnets = mock.sentinel.subnets
         security_groups = 'test-sg'
 
@@ -1095,7 +1097,7 @@ class NestedVIFPool(test_base.TestCase):
             pool_key: {tuple(security_groups): collections.deque([])}}
         m_driver._last_update = {pool_key: {tuple(security_groups): 1}}
 
-        self.assertRaises(exceptions.ResourceNotReady, cls._get_port_from_pool,
+        self.assertRaises(exceptions.VIFPoolNotReady, cls._get_port_from_pool,
                           m_driver, pool_key, pod, subnets, tuple(
                               security_groups))
 
