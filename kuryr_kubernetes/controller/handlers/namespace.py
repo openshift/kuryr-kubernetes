@@ -188,17 +188,12 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
 
     @MEMOIZE
     def _check_quota(self, quota):
-        neutron = clients.get_neutron_client()
-        resources = {'subnet': neutron.list_subnets,
-                     'network': neutron.list_networks,
-                     'security_group': neutron.list_security_groups}
+        resources = ('subnets', 'networks', 'security_groups')
 
-        for resource, neutron_func in resources.items():
+        for resource in resources:
             resource_quota = quota[resource]
-            resource_name = resource + 's'
             if utils.has_limit(resource_quota):
-                if not utils.is_available(resource_name, resource_quota,
-                                          neutron_func):
+                if not utils.is_available(resource, resource_quota):
                     return False
         return True
 

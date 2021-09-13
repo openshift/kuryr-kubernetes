@@ -219,15 +219,18 @@ def extract_pod_annotation(annotation):
 
 def has_limit(quota):
     NO_LIMIT = -1
-    return quota != NO_LIMIT
+    return quota['limit'] != NO_LIMIT
 
 
-def is_available(resource, resource_quota, neutron_func):
-    qnt_resources = len(neutron_func().get(resource))
-    availability = resource_quota - qnt_resources
+def is_available(resource, resource_quota):
+    availability = resource_quota['limit'] - resource_quota['used']
     if availability <= 0:
-        LOG.error("Quota exceeded for resource: %s", resource)
+        LOG.error("Neutron quota exceeded for %s. Used %d out of %d limit.",
+                  resource, resource_quota['used'], resource_quota['limit'])
         return False
+    elif availability <= 3:
+        LOG.warning("Neutron quota low for %s. Used %d out of %d limit.",
+                    resource, resource_quota['used'], resource_quota['limit'])
     return True
 
 

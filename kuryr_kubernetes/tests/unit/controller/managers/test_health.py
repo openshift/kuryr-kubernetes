@@ -23,15 +23,51 @@ from oslo_config import cfg as oslo_cfg
 def get_quota_obj():
     return {
         'quota': {
-            'subnet': 100,
-            'network': 100,
-            'floatingip': 50,
-            'subnetpool': -1,
-            'security_group_rule': 100,
-            'security_group': 10,
-            'router': 10,
-            'rbac_policy': 10,
-            'port': 500
+            'subnet': {
+                'used': 50,
+                'limit': 100,
+                'reserved': 0
+            },
+            'network': {
+                'used': 50,
+                'limit': 100,
+                'reserved': 0
+            },
+            'floatingip': {
+                'used': 25,
+                'limit': 50,
+                'reserved': 0
+            },
+            'subnetpool': {
+                'used': 0,
+                'limit': -1,
+                'reserved': 0
+            },
+            'security_group_rule': {
+                'used': 50,
+                'limit': 100,
+                'reserved': 0
+            },
+            'security_group': {
+                'used': 5,
+                'limit': 10,
+                'reserved': 0
+            },
+            'router': {
+                'used': 5,
+                'limit': 10,
+                'reserved': 0
+            },
+            'rbac_policy': {
+                'used': 5,
+                'limit': 10,
+                'reserved': 0
+            },
+            'port': {
+                'used': 250,
+                'limit': 500,
+                'reserved': 0
+            }
         }
     }
 
@@ -144,8 +180,8 @@ class TestHealthServer(base.TestCase):
 
     @mock.patch.object(_TestHandler, 'is_ready')
     def test__components_ready(self, m_status):
-        neutron = self.useFixture(k_fix.MockNeutronClient()).client
-        neutron.show_quota.return_value = get_quota_obj()
+        neutron = self.useFixture(k_fix.MockNetworkClient()).client
+        neutron.get_quota.return_value = get_quota_obj()
         self.srv._registry = [_TestHandler()]
         m_status.return_value = True
 
@@ -153,12 +189,12 @@ class TestHealthServer(base.TestCase):
 
         m_status.assert_called_once()
         self.assertEqual(resp, True)
-        neutron.show_quota.assert_called_once()
+        neutron.get_quota.assert_called_once()
 
     @mock.patch.object(_TestHandler, 'is_ready')
     def test__components_ready_error(self, m_status):
-        neutron = self.useFixture(k_fix.MockNeutronClient()).client
-        neutron.show_quota.return_value = get_quota_obj()
+        neutron = self.useFixture(k_fix.MockNetworkClient()).client
+        neutron.get_quota.return_value = get_quota_obj()
         self.srv._registry = [_TestHandler()]
         m_status.return_value = False
 
@@ -166,7 +202,7 @@ class TestHealthServer(base.TestCase):
 
         m_status.assert_called_once()
         self.assertEqual(resp, False)
-        neutron.show_quota.assert_called_once()
+        neutron.get_quota.assert_called_once()
 
     @mock.patch.object(_TestHandler, 'is_alive')
     def test_liveness(self, m_status):

@@ -59,9 +59,9 @@ class HealthServer(object):
         self.headers = {'Connection': 'close'}
 
     def _components_ready(self):
-        neutron = clients.get_neutron_client()
+        neutron = clients.get_network_client()
         project_id = config.CONF.neutron_defaults.project
-        quota = neutron.show_quota(project_id).get('quota')
+        quota = neutron.get_quota(quota=project_id, details=True)
 
         for component in self._registry:
             if not component.is_ready(quota):
