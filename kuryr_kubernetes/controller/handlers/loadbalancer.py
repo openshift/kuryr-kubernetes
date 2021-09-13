@@ -21,6 +21,7 @@ from kuryr_kubernetes import clients
 from kuryr_kubernetes import config
 from kuryr_kubernetes import constants as k_const
 from kuryr_kubernetes.controller.drivers import base as drv_base
+from kuryr_kubernetes.controller.drivers import utils as driver_utils
 from kuryr_kubernetes import exceptions as k_exc
 from kuryr_kubernetes.handlers import k8s_base
 from kuryr_kubernetes import utils
@@ -29,6 +30,7 @@ LOG = logging.getLogger(__name__)
 CONF = config.CONF
 
 OCTAVIA_DEFAULT_PROVIDERS = ['octavia', 'amphora']
+CRD_RECONCILIATION_FREQUENCY = 600  # seconds
 
 
 class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
@@ -58,7 +60,6 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
 
     def on_present(self, loadbalancer_crd, *args, **kwargs):
         if loadbalancer_crd.get('status', None) is None:
-
             kubernetes = clients.get_kubernetes_client()
             try:
                 kubernetes.patch_crd('status',
@@ -112,6 +113,56 @@ class KuryrLoadBalancerHandler(k8s_base.ResourceEventHandler):
                         'service_pub_ip_info'] = service_pub_ip_info
                     self._update_lb_status(loadbalancer_crd)
                     self._patch_status(loadbalancer_crd)
+
+    def reconcile(self):
+        loadbalancer_crds = []
+        try:
+            loadbalancer_crds = driver_utils.get_kuryrloadbalancer_crds()
+        except k_exc.K8sClientException:
+            LOG.warning("Error retriving KuryrLoadBalanders CRDs")
+        try:
+            self._trigger_loadbalancer_reconciliation(loadbalancer_crds)
+        except Exception:
+            LOG.exception('Error while running loadbalancers reconciliation.')
+
+    def _trigger_loadbalancer_reconciliation(self, loadbalancer_crds):
+        LOG.debug("Reconciling the loadbalancer CRDs")
+        # get the loadbalancers id in the CRD status
+        crd_loadbalancer_ids = [{'id': loadbalancer_crd.get('status', {}).get(
+                                'loadbalancer', {}).get('id', {}), 'selflink':
+                                utils.get_res_link(loadbalancer_crd)} for
+                                loadbalancer_crd in loadbalancer_crds]
+        lbaas = clients.get_loadbalancer_client()
+        lbaas_spec = {}
+        self._drv_lbaas.add_tags('loadbalancer', lbaas_spec)
+        loadbalancers = lbaas.load_balancers(**lbaas_spec)
+        loadbalancers_id = [loadbalancer['id']
+                            for loadbalancer in loadbalancers]
+        # for each loadbalancer id in the CRD status, check if exists in
+        # OpenStack
+        crds_to_reconcile_selflink = [crd_lb['selflink'] for crd_lb in
+                                      crd_loadbalancer_ids if
+                                      crd_lb['id'] not in loadbalancers_id]
+        if not crds_to_reconcile_selflink:
+            LOG.debug("KuryrLoadBalancer CRDs already in sync with OpenStack")
+            return
+        LOG.debug("Reconciling the following KuryrLoadBalancer CRDs: %r",
+                  crds_to_reconcile_selflink)
+        self._reconcile_lbaas(crds_to_reconcile_selflink)
+
+    def _reconcile_lbaas(self, crds_to_reconcile_selflink):
+        kubernetes = clients.get_kubernetes_client()
+        for selflink in crds_to_reconcile_selflink:
+            try:
+                kubernetes.patch_crd('status', selflink, {})
+            except k_exc.K8sResourceNotFound:
+                LOG.debug('Unable to reconcile the KuryLoadBalancer CRD %s',
+                          selflink)
+                continue
+            except k_exc.K8sClientException:
+                LOG.warning('Unable to patch the KuryLoadBalancer CRD %s',
+                            selflink)
+                continue
 
     def _should_ignore(self, loadbalancer_crd):
         return (not(self._has_endpoints(loadbalancer_crd) or
