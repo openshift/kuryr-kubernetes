@@ -225,7 +225,8 @@ class TestLBaaSv2Driver(test_base.TestCase):
         loadbalancer = obj_lbaas.LBaaSLoadBalancer(
             id=loadbalancer_id, name=name, project_id=project_id,
             subnet_id=subnet_id, ip=ip, provider=provider)
-        m_driver._ensure_provisioned.side_effect = o_exc.BadRequestException
+        m_driver._ensure_provisioned.side_effect = o_exc.BadRequestException(
+            response=mock.Mock(status_code=409))
 
         resp = cls.ensure_listener(m_driver, loadbalancer,
                                    protocol, port)

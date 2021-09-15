@@ -664,10 +664,18 @@ class LBaaSv2Driver(base.LBaaSDriver):
             result = self._ensure_provisioned(
                 loadbalancer, listener, self._create_listener,
                 self._find_listener, _LB_STS_POLL_SLOW_INTERVAL)
-        except requests.exceptions.HTTPError:
-            LOG.info("Listener creation failed, most probably because "
-                     "protocol %(prot)s is not supported", {'prot': protocol})
-            return None
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # The LB must be gone.
+                LOG.warning("Loadbalancer %s for Service %s doesn't exist, "
+                            "attempting to recreate it", loadbalancer.id,
+                            loadbalancer.name)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, "DELETED")
+            else:
+                LOG.info("Listener creation failed, most probably because "
+                         "protocol %s is not supported", protocol)
+                return None
 
         if result:
             self._ensure_security_group_rules(loadbalancer, result,
@@ -706,9 +714,21 @@ class LBaaSv2Driver(base.LBaaSDriver):
                                    loadbalancer_id=loadbalancer.id,
                                    listener_id=listener.id,
                                    protocol=listener.protocol)
-        return self._ensure_provisioned(loadbalancer, pool,
-                                        self._create_pool,
-                                        self._find_pool)
+        try:
+            return self._ensure_provisioned(loadbalancer, pool,
+                                            self._create_pool,
+                                            self._find_pool)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # Either LB or listener doesn't exist.
+                LOG.warning("Loadbalancer %s or listener %s created for "
+                            "Service %s doesn't exist. Attempting to recreate "
+                            "them.", loadbalancer.id, listener.id,
+                            loadbalancer.name)
+                self.release_loadbalancer(loadbalancer)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, "DELETED")
+            raise
 
     def ensure_pool_attached_to_lb(self, loadbalancer, namespace,
                                    svc_name, protocol):
@@ -739,10 +759,22 @@ class LBaaSv2Driver(base.LBaaSDriver):
                                        subnet_id=subnet_id,
                                        ip=ip,
                                        port=port)
-        result = self._ensure_provisioned(loadbalancer, member,
-                                          self._create_member,
-                                          self._find_member,
-                                          update=lbaas.update_member)
+        try:
+            result = self._ensure_provisioned(loadbalancer, member,
+                                              self._create_member,
+                                              self._find_member,
+                                              update=lbaas.update_member)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # Either LB or pool doesn't exist.
+                LOG.warning("Loadbalancer %s or pool %s created for "
+                            "Service %s doesn't exist. Attempting to recreate "
+                            "them.", loadbalancer.id, pool.id,
+                            loadbalancer.name)
+                self.release_loadbalancer(loadbalancer)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, "DELETED")
+            raise
 
         network_policy = (
             'policy' in CONF.kubernetes.enabled_handlers and
@@ -1050,7 +1082,8 @@ class LBaaSv2Driver(base.LBaaSDriver):
                 if result:
                     return result
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == httplib.BAD_REQUEST:
+                if e.response.status_code in (httplib.BAD_REQUEST,
+                                              httplib.NOT_FOUND):
                     raise
 
         raise k_exc.ResourceNotReady(obj)
