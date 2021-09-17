@@ -5,7 +5,7 @@ ENV container=oci
 RUN yum install -y python3-devel python3-pbr python3-pip \
  && yum clean all \
  && rm -rf /var/cache/yum \
- && pip3 install tox
+ && pip3 install tox "virtualenv==20.7.2"
 
 LABEL \
         io.k8s.description="This is a component of OpenShift Container Platform and provides a testing container for Kuryr service." \
