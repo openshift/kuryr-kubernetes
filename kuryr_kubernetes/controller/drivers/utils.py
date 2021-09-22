@@ -554,3 +554,45 @@ def get_ports_by_attrs(**attrs):
     neutron = clients.get_neutron_client()
     ports = neutron.list_ports(**attrs)
     return ports['ports']
+
+
+def delete_port(leftover_port):
+    neutron = clients.get_neutron_client()
+
+    try:
+        # NOTE(gryf): there is unlikely, that we get an exception
+        # like PortNotFound or something, since openstacksdk
+        # doesn't raise an exception if port doesn't exists nor
+        # return any information.
+        neutron.delete_port(leftover_port['id'])
+    except n_exc.PortNotFoundClient:
+        LOG.debug("Port already deleted.")
+    except n_exc.NeutronClientException as e:
+        if "currently a subport for trunk" in str(e):
+            LOG.warning("Port %s is in DOWN status but still "
+                        "associated to a trunk. This should not "
+                        "happen. Trying to delete it from the "
+                        "trunk.", leftover_port['id'])
+            # Get the trunk_id from the error message
+            trunk_id = (
+                str(e).split('trunk')[1].split('.')[0].strip())
+
+            try:
+                neutron.trunk_remove_subports(
+                    trunk_id, {'sub_ports': [
+                        {'port_id': leftover_port['id']}]})
+            except n_exc.NotFound:
+                LOG.debug(
+                    "Port %s already removed from trunk %s",
+                    leftover_port['id'], trunk_id)
+            try:
+                neutron.delete_port(leftover_port['id'])
+            except n_exc.NeutronClientException:
+                LOG.exception("Unexpected error deleting "
+                              "leftover port %s. Skipping it "
+                              "and continue with the other "
+                              "rest.", leftover_port['id'])
+        else:
+            LOG.exception("Unexpected error deleting leftover "
+                          "port %s. Skiping it and continue with "
+                          "the other rest.", leftover_port['id'])
