@@ -13,6 +13,7 @@
 import random
 import socket
 import time
+import uuid
 
 import requests
 
@@ -309,16 +310,36 @@ def set_lbaas_state(endpoints, lbaas_state):
     # TODO(ivc): extract annotation interactions
     if lbaas_state is None:
         LOG.debug("Removing LBaaSState annotation: %r", lbaas_state)
-        annotation = None
+        # Adding a random annotation to make sure this will trigger an event
+        # that we'll notice and act upon.
+        annotations = {
+            constants.K8S_ANNOTATION_LBAAS_STATE: None,
+            constants.K8S_ANNOTATION_LBAAS_TRIGGER: uuid.uuid4()
+        }
     else:
         lbaas_state.obj_reset_changes(recursive=True)
         LOG.debug("Setting LBaaSState annotation: %r", lbaas_state)
-        annotation = jsonutils.dumps(lbaas_state.obj_to_primitive(),
-                                     sort_keys=True)
+        annotations = {
+            constants.K8S_ANNOTATION_LBAAS_STATE:
+                jsonutils.dumps(lbaas_state.obj_to_primitive(),
+                                sort_keys=True)}
     k8s = clients.get_kubernetes_client()
-    k8s.annotate(endpoints['metadata']['selfLink'],
-                 {constants.K8S_ANNOTATION_LBAAS_STATE: annotation},
+    k8s.annotate(endpoints['metadata']['selfLink'], annotations,
                  resource_version=endpoints['metadata']['resourceVersion'])
+
+
+def clean_lbaas_state(loadbalancer):
+    namespace, name = loadbalancer.name.split('/')
+    k8s = clients.get_kubernetes_client()
+    url = '%s/%s/endpoints/%s' % (constants.K8S_API_NAMESPACES, namespace,
+                                  name)
+    try:
+        endpoints = k8s.get(url)
+    except exceptions.K8sResourceNotFound:
+        # If it's gone, then fine
+        return
+
+    set_lbaas_state(endpoints, None)
 
 
 def get_endpoints_link(service):

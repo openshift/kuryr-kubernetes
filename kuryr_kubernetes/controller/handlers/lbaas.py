@@ -185,42 +185,49 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
         if not lbaas_state:
             lbaas_state = obj_lbaas.LBaaSState()
 
-        if self._sync_lbaas_members(endpoints, lbaas_state, lbaas_spec):
-            # Note(yboaron) For LoadBalancer services, we should allocate FIP,
-            # associate it to LB VIP and update K8S service status
-            if lbaas_state.service_pub_ip_info is None:
-                service_pub_ip_info = (
-                    self._drv_service_pub_ip.acquire_service_pub_ip_info(
-                        lbaas_spec.type,
-                        lbaas_spec.lb_ip,
-                        lbaas_spec.project_id,
-                        lbaas_state.loadbalancer.port_id))
-                if service_pub_ip_info:
-                    self._drv_service_pub_ip.associate_pub_ip(
-                        service_pub_ip_info, lbaas_state.loadbalancer.port_id)
-                    lbaas_state.service_pub_ip_info = service_pub_ip_info
-                    self._update_lb_status(
-                        endpoints,
-                        lbaas_state.service_pub_ip_info.ip_addr)
-            # REVISIT(ivc): since _sync_lbaas_members is responsible for
-            # creating all lbaas components (i.e. load balancer, listeners,
-            # pools, members), it is currently possible for it to fail (due
-            # to invalid Kuryr/K8s/Neutron configuration, e.g. Members' IPs
-            # not belonging to configured Neutron subnet or Service IP being
-            # in use by gateway or VMs) leaving some Neutron entities without
-            # properly updating annotation. Some sort of failsafe mechanism is
-            # required to deal with such situations (e.g. cleanup, or skip
-            # failing items, or validate configuration) to prevent annotation
-            # being out of sync with the actual Neutron state.
-            try:
-                utils.set_lbaas_state(endpoints, lbaas_state)
-            except k_exc.K8sResourceNotFound:
-                # Note(yboaron) It's impossible to store neutron resources
-                # in K8S object since object was deleted. In that case
-                # we should rollback all neutron resources.
-                LOG.debug("LoadBalancerHandler failed to store Openstack "
-                          "resources in K8S object (not found)")
-                self.on_deleted(endpoints, lbaas_state)
+        try:
+            if self._sync_lbaas_members(endpoints, lbaas_state, lbaas_spec):
+                # Note(yboaron) For LoadBalancer services, we should allocate
+                # FIP, associate it to LB VIP and update K8S service status
+                if lbaas_state.service_pub_ip_info is None:
+                    service_pub_ip_info = (
+                        self._drv_service_pub_ip.acquire_service_pub_ip_info(
+                            lbaas_spec.type,
+                            lbaas_spec.lb_ip,
+                            lbaas_spec.project_id,
+                            lbaas_state.loadbalancer.port_id))
+                    if service_pub_ip_info:
+                        self._drv_service_pub_ip.associate_pub_ip(
+                            service_pub_ip_info,
+                            lbaas_state.loadbalancer.port_id)
+                        lbaas_state.service_pub_ip_info = service_pub_ip_info
+                        self._update_lb_status(
+                            endpoints,
+                            lbaas_state.service_pub_ip_info.ip_addr)
+                # REVISIT(ivc): since _sync_lbaas_members is responsible for
+                # creating all lbaas components (i.e. load balancer, listeners,
+                # pools, members), it is currently possible for it to fail (due
+                # to invalid Kuryr/K8s/Neutron configuration, e.g. Members' IPs
+                # not belonging to configured Neutron subnet or Service IP
+                # being in use by gateway or VMs) leaving some Neutron entities
+                # without properly updating annotation. Some sort of failsafe
+                # mechanism is required to deal with such situations (e.g.
+                # cleanup, or skip failing items, or validate configuration) to
+                # prevent annotation being out of sync with the actual Neutron
+                # state.
+                try:
+                    utils.set_lbaas_state(endpoints, lbaas_state)
+                except k_exc.K8sResourceNotFound:
+                    # Note(yboaron) It's impossible to store neutron resources
+                    # in K8S object since object was deleted. In that case
+                    # we should rollback all neutron resources.
+                    LOG.debug("LoadBalancerHandler failed to store Openstack "
+                              "resources in K8S object (not found)")
+                    self.on_deleted(endpoints, lbaas_state)
+        except k_exc.LoadBalancerRemoved as e:
+            LOG.warning('Load balancer %s created for Service %s was in state '
+                        '%s. Kuryr deleted it and will attempt to recreate it',
+                        e.id, e.name, e.state)
 
     def on_deleted(self, endpoints, lbaas_state=None):
         if lbaas_state is None:
@@ -391,6 +398,8 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
                         target_ref_namespace=target_ref['namespace'],
                         target_ref_name=target_ref['name'],
                         listener_port=listener_port)
+                    if not member:
+                        continue
                     lbaas_state.members.append(member)
                     changed = True
 
@@ -477,6 +486,8 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
                 continue
             pool = self._drv_lbaas.ensure_pool(lbaas_state.loadbalancer,
                                                listener)
+            if not pool:
+                continue
             lbaas_state.pools.append(pool)
             changed = True
 
@@ -600,6 +611,8 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
             if lbaas_state.service_pub_ip_info:
                 self._drv_service_pub_ip.disassociate_pub_ip(
                     lbaas_state.service_pub_ip_info)
+                self._drv_service_pub_ip.release_pub_ip(
+                    lbaas_state.service_pub_ip_info)
 
             self._drv_lbaas.release_loadbalancer(
                 loadbalancer=lb)
@@ -622,12 +635,7 @@ class LoadBalancerHandler(k8s_base.ResourceEventHandler):
                     security_groups_ids=lbaas_spec.security_groups_ids,
                     service_type=lbaas_spec.type,
                     provider=self._lb_provider)
-                changed = True
-            elif lbaas_state.service_pub_ip_info:
-                self._drv_service_pub_ip.release_pub_ip(
-                    lbaas_state.service_pub_ip_info)
-                lbaas_state.service_pub_ip_info = None
-                changed = True
+            changed = True
 
         lbaas_state.loadbalancer = lb
         return changed

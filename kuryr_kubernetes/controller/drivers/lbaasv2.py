@@ -159,6 +159,10 @@ class LBaaSv2Driver(base.LBaaSDriver):
     def release_loadbalancer(self, loadbalancer):
         neutron = clients.get_neutron_client()
         lbaas = clients.get_loadbalancer_client()
+        if not loadbalancer or not loadbalancer.id:
+            LOG.debug("Loadbalancer state without ID, ignoring.")
+            return
+
         self._release(
             loadbalancer,
             loadbalancer,
@@ -166,10 +170,11 @@ class LBaaSv2Driver(base.LBaaSDriver):
             loadbalancer.id,
             cascade=True)
 
+        # Note: reusing activation timeout as deletion timeout
+        self._wait_for_deletion(loadbalancer, _ACTIVATION_TIMEOUT)
+
         sg_id = self._find_listeners_sg(loadbalancer)
         if sg_id:
-            # Note: reusing activation timeout as deletion timeout
-            self._wait_for_deletion(loadbalancer, _ACTIVATION_TIMEOUT)
             try:
                 neutron.delete_security_group(sg_id)
             except n_exc.NotFound:
@@ -659,12 +664,22 @@ class LBaaSv2Driver(base.LBaaSDriver):
             result = self._ensure_provisioned(
                 loadbalancer, listener, self._create_listener,
                 self._find_listener, _LB_STS_POLL_SLOW_INTERVAL)
-        except requests.exceptions.HTTPError:
-            LOG.info("Listener creation failed, most probably because "
-                     "protocol %(prot)s is not supported", {'prot': protocol})
-            return None
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # The LB must be gone.
+                LOG.warning("Loadbalancer %s for Service %s doesn't exist, "
+                            "attempting to recreate it", loadbalancer.id,
+                            loadbalancer.name)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, "DELETED")
+            else:
+                LOG.info("Listener creation failed, most probably because "
+                         "protocol %s is not supported", protocol)
+                return None
 
-        self._ensure_security_group_rules(loadbalancer, result, service_type)
+        if result:
+            self._ensure_security_group_rules(loadbalancer, result,
+                                              service_type)
 
         return result
 
@@ -699,9 +714,21 @@ class LBaaSv2Driver(base.LBaaSDriver):
                                    loadbalancer_id=loadbalancer.id,
                                    listener_id=listener.id,
                                    protocol=listener.protocol)
-        return self._ensure_provisioned(loadbalancer, pool,
-                                        self._create_pool,
-                                        self._find_pool)
+        try:
+            return self._ensure_provisioned(loadbalancer, pool,
+                                            self._create_pool,
+                                            self._find_pool)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # Either LB or listener doesn't exist.
+                LOG.warning("Loadbalancer %s or listener %s created for "
+                            "Service %s doesn't exist. Attempting to recreate "
+                            "them.", loadbalancer.id, listener.id,
+                            loadbalancer.name)
+                self.release_loadbalancer(loadbalancer)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, "DELETED")
+            raise
 
     def ensure_pool_attached_to_lb(self, loadbalancer, namespace,
                                    svc_name, protocol):
@@ -732,10 +759,22 @@ class LBaaSv2Driver(base.LBaaSDriver):
                                        subnet_id=subnet_id,
                                        ip=ip,
                                        port=port)
-        result = self._ensure_provisioned(loadbalancer, member,
-                                          self._create_member,
-                                          self._find_member,
-                                          update=lbaas.update_member)
+        try:
+            result = self._ensure_provisioned(loadbalancer, member,
+                                              self._create_member,
+                                              self._find_member,
+                                              update=lbaas.update_member)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # Either LB or pool doesn't exist.
+                LOG.warning("Loadbalancer %s or pool %s created for "
+                            "Service %s doesn't exist. Attempting to recreate "
+                            "them.", loadbalancer.id, pool.id,
+                            loadbalancer.name)
+                self.release_loadbalancer(loadbalancer)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, "DELETED")
+            raise
 
         network_policy = (
             'policy' in CONF.kubernetes.enabled_handlers and
@@ -833,15 +872,25 @@ class LBaaSv2Driver(base.LBaaSDriver):
             vip_address=str(loadbalancer.ip),
             vip_subnet_id=loadbalancer.subnet_id)
 
-        try:
-            os_lb = next(response)  # openstacksdk returns a generator
+        for os_lb in response:
+            if os_lb.provisioning_status in ('PENDING_DELETE', 'DELETED'):
+                # This one's being deleted, ignore.
+                continue
             loadbalancer.id = os_lb.id
+            if os_lb.provisioning_status == 'ERROR':
+                LOG.warning('Cleaning up LB %s in ERROR state', os_lb.id)
+                try:
+                    self.release_loadbalancer(loadbalancer)
+                except k_exc.ResourceNotReady:
+                    # We want to make sure state is cleaned
+                    pass
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer,
+                                                os_lb.provisioning_status)
             loadbalancer.port_id = self._get_vip_port(loadbalancer).get("id")
             loadbalancer.provider = os_lb.provider
-            if os_lb.provisioning_status == 'ERROR':
-                self.release_loadbalancer(loadbalancer)
-                return None
-        except (KeyError, StopIteration):
+            break
+        else:
             return None
 
         return loadbalancer
@@ -874,8 +923,10 @@ class LBaaSv2Driver(base.LBaaSDriver):
         }
 
         # Wait for the loadbalancer to be ACTIVE
-        self._wait_for_provisioning(loadbalancer, _ACTIVATION_TIMEOUT,
-                                    _LB_STS_POLL_FAST_INTERVAL)
+        if not self._wait_for_provisioning(loadbalancer, _ACTIVATION_TIMEOUT,
+                                           _LB_STS_POLL_FAST_INTERVAL):
+            LOG.debug('Skipping ACLs update. No Load Balancer Provisioned')
+            return
 
         lbaas = clients.get_loadbalancer_client()
         response = lbaas.put(o_lis.Listener.base_path + '/' + listener_id,
@@ -1009,34 +1060,30 @@ class LBaaSv2Driver(base.LBaaSDriver):
         return result
 
     def _ensure_loadbalancer(self, loadbalancer):
-        try:
-            result = self._create_loadbalancer(loadbalancer)
-            LOG.debug("Created %(obj)s", {'obj': result})
-            return result
-        except o_exc.HttpException as e:
-            if e.status_code not in OKAY_CODES:
-                raise
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code not in OKAY_CODES:
-                raise
-
         result = self._find_loadbalancer(loadbalancer)
         if result:
             LOG.debug("Found %(obj)s", {'obj': result})
+            return result
+
+        result = self._create_loadbalancer(loadbalancer)
+        LOG.debug("Created %(obj)s", {'obj': result})
         return result
 
     def _ensure_provisioned(self, loadbalancer, obj, create, find,
                             interval=_LB_STS_POLL_FAST_INTERVAL, **kwargs):
         for remaining in self._provisioning_timer(_ACTIVATION_TIMEOUT,
                                                   interval):
-            self._wait_for_provisioning(loadbalancer, remaining, interval)
+            if not self._wait_for_provisioning(loadbalancer, remaining,
+                                               interval):
+                return None
             try:
                 result = self._ensure(
                     create, find, obj, loadbalancer, **kwargs)
                 if result:
                     return result
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == httplib.BAD_REQUEST:
+                if e.response.status_code in (httplib.BAD_REQUEST,
+                                              httplib.NOT_FOUND):
                     raise
 
         raise k_exc.ResourceNotReady(obj)
@@ -1048,7 +1095,9 @@ class LBaaSv2Driver(base.LBaaSDriver):
                     delete(*args, **kwargs)
                     return
                 except (o_exc.ConflictException, o_exc.BadRequestException):
-                    self._wait_for_provisioning(loadbalancer, remaining)
+                    if not self._wait_for_provisioning(loadbalancer,
+                                                       remaining):
+                        return
             except o_exc.NotFoundException:
                 return
 
@@ -1059,17 +1108,34 @@ class LBaaSv2Driver(base.LBaaSDriver):
         lbaas = clients.get_loadbalancer_client()
 
         for remaining in self._provisioning_timer(timeout, interval):
-            response = lbaas.get_load_balancer(loadbalancer.id)
+            try:
+                response = lbaas.get_load_balancer(loadbalancer.id)
+            except o_exc.ResourceNotFound:
+                LOG.warning("Cleaning status for deleted loadbalancer %s",
+                            loadbalancer.name)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, 'DELETED')
+
             status = response.provisioning_status
             if status == 'ACTIVE':
-                LOG.debug("Provisioning complete for %(lb)s", {
-                    'lb': loadbalancer})
-                return
+                LOG.debug("Provisioning complete for %(lb)s",
+                          {'lb': loadbalancer})
+                return loadbalancer
             elif status == 'ERROR':
-                LOG.debug("Releasing loadbalancer %s with error status",
-                          loadbalancer.id)
-                self.release_loadbalancer(loadbalancer)
-                raise k_exc.ResourceNotReady(loadbalancer.id)
+                LOG.warning("Releasing loadbalancer %s with ERROR status",
+                            loadbalancer.id)
+                try:
+                    self.release_loadbalancer(loadbalancer)
+                except k_exc.ResourceNotReady:
+                    # We want to make sure the state is cleaned.
+                    pass
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, status)
+            elif status == 'DELETED':
+                LOG.warning("Cleaning loadbalancer status for deleted "
+                            "loadbalancer %s", loadbalancer.name)
+                utils.clean_lbaas_state(loadbalancer)
+                raise k_exc.LoadBalancerRemoved(loadbalancer, status)
             else:
                 LOG.debug("Provisioning status %(status)s for %(lb)s, "
                           "%(rem).3gs remaining until timeout",
@@ -1084,8 +1150,15 @@ class LBaaSv2Driver(base.LBaaSDriver):
 
         for remaining in self._provisioning_timer(timeout, interval):
             try:
-                lbaas.get_load_balancer(loadbalancer.id)
-            except o_exc.ResourceNotFound:
+                lb = lbaas.get_load_balancer(loadbalancer.id)
+                if lb.provisioning_status not in ('DELETED', 'PENDING_DELETE'):
+                    # Octavia tends to ignore delete requests, so just screw it
+                    # and retry if that happens.
+                    LOG.warning('LB %s does not seem to be deleted. This is '
+                                'unexpected and may indicate a problem with '
+                                'Octavia, retrying!', loadbalancer.id)
+                    lbaas.delete_load_balancer(loadbalancer.id, cascade=True)
+            except (o_exc.ResourceNotFound, o_exc.NotFoundException):
                 return
 
     def _provisioning_timer(self, timeout,

@@ -225,7 +225,8 @@ class TestLBaaSv2Driver(test_base.TestCase):
         loadbalancer = obj_lbaas.LBaaSLoadBalancer(
             id=loadbalancer_id, name=name, project_id=project_id,
             subnet_id=subnet_id, ip=ip, provider=provider)
-        m_driver._ensure_provisioned.side_effect = o_exc.BadRequestException
+        m_driver._ensure_provisioned.side_effect = o_exc.BadRequestException(
+            response=mock.Mock(status_code=409))
 
         resp = cls.ensure_listener(m_driver, loadbalancer,
                                    protocol, port)
@@ -479,12 +480,13 @@ class TestLBaaSv2Driver(test_base.TestCase):
         self.assertIsNone(ret)
         m_driver.release_loadbalancer.assert_not_called()
 
-    def test_find_loadbalancer_error(self):
+    @mock.patch('kuryr_kubernetes.clients.get_kubernetes_client')
+    def test_find_loadbalancer_error(self, m_get_k8s):
         lbaas = self.useFixture(k_fix.MockLBaaSClient()).client
         cls = d_lbaasv2.LBaaSv2Driver
         m_driver = mock.Mock(spec=d_lbaasv2.LBaaSv2Driver)
         loadbalancer = obj_lbaas.LBaaSLoadBalancer(
-            name='TEST_NAME', project_id='TEST_PROJECT', ip='1.2.3.4',
+            name='TEST_NS/TEST_NAME', project_id='TEST_PROJECT', ip='1.2.3.4',
             subnet_id='D3FA400A-F543-4B91-9CD3-047AF0CE42D1')
         loadbalancer_id = '00EE9E11-91C2-41CF-8FD4-7970579E5C4C'
         resp = iter([o_lb.LoadBalancer(id=loadbalancer_id, provider='haproxy',
@@ -492,14 +494,23 @@ class TestLBaaSv2Driver(test_base.TestCase):
         lbaas.load_balancers.return_value = resp
         m_driver._get_vip_port.return_value = {'id': mock.sentinel.port_id}
 
-        ret = cls._find_loadbalancer(m_driver, loadbalancer)
+        m_k8s = mock.Mock()
+        m_k8s.get.return_value = {'metadata': {'selfLink': 'foo',
+                                               'resourceVersion': 123}}
+        m_get_k8s.return_value = m_k8s
+
+        self.assertRaises(k_exc.LoadBalancerRemoved, cls._find_loadbalancer,
+                          m_driver, loadbalancer)
         lbaas.load_balancers.assert_called_once_with(
             name=loadbalancer.name,
             project_id=loadbalancer.project_id,
             vip_address=str(loadbalancer.ip),
             vip_subnet_id=loadbalancer.subnet_id)
-        self.assertIsNone(ret)
         m_driver.release_loadbalancer.assert_called_once()
+        m_k8s.get.assert_called_once_with('/api/v1/namespaces/TEST_NS/'
+                                          'endpoints/TEST_NAME')
+        m_k8s.annotate.assert_called_once_with('foo', mock.ANY,
+                                               resource_version=123)
 
     def test_create_listener(self):
         cls = d_lbaasv2.LBaaSv2Driver
