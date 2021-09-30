@@ -191,7 +191,7 @@ class NamespaceHandler(k8s_base.ResourceEventHandler):
         resources = ('subnets', 'networks', 'security_groups')
 
         for resource in resources:
-            resource_quota = quota[resource]
+            resource_quota = getattr(quota, resource)
             if utils.has_limit(resource_quota):
                 if not utils.is_available(resource, resource_quota):
                     return False
