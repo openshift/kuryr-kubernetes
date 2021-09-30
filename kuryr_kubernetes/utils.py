@@ -452,3 +452,12 @@ def clean_lb_crd_status(loadbalancer_name):
         LOG.exception('Error updating KuryrLoadbalancer CRD %s',
                       name)
         raise
+
+
+def is_pod_completed(pod):
+    try:
+        return (pod['status']['phase'] in
+                (constants.K8S_POD_STATUS_SUCCEEDED,
+                 constants.K8S_POD_STATUS_FAILED))
+    except KeyError:
+        return False
