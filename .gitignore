@@ -54,6 +54,7 @@ ChangeLog
 !/.testr.conf
 !/.stestr.conf
 !/.oit
+.stestr
 
 contrib/vagrant/.vagrant
 
