@@ -51,7 +51,7 @@ class Retry(base.EventHandler):
         self._interval = interval
         self._k8s = clients.get_kubernetes_client()
 
-    def __call__(self, event):
+    def __call__(self, event, *args, **kwargs):
         deadline = time.time() + self._timeout
         for attempt in itertools.count(1):
             if event.get('type') in ['MODIFIED', 'ADDED']:
@@ -75,9 +75,12 @@ class Retry(base.EventHandler):
                                       "object. Continuing with handler "
                                       "execution.")
             try:
-                self._handler(event)
+                self._handler(event, *args, **kwargs)
                 break
-            except n_exc.OverQuotaClient:
+            except (n_exc.OverQuotaClient,
+                    n_exc.IpAddressGenerationFailureClient,
+                    exceptions.LoadBalancerNotReady, exceptions.PortNotReady,
+                    exceptions.VIFPoolNotReady):
                 with excutils.save_and_reraise_exception() as ex:
                     if self._sleep(deadline, attempt, ex.value):
                         ex.reraise = False

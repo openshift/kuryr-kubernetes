@@ -22,7 +22,7 @@ class EventHandler(object):
     """Base class for event handlers."""
 
     @abc.abstractmethod
-    def __call__(self, event):
+    def __call__(self, event, *args, **kwargs):
         """Handle the event."""
         raise NotImplementedError()
 
