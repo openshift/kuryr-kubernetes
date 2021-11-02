@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from ctypes import c_bool
+import errno
 import multiprocessing
 import os
 from six.moves import http_client as httplib
@@ -302,9 +303,32 @@ class CNIDaemonServiceManager(cotyledon.ServiceManager):
         self.register_hooks(on_terminate=self.terminate)
 
     def run(self):
+        reaper_thread = threading.Thread(target=self._zombie_reaper)
+        reaper_thread.setDaemon(True)
+
+        self._terminate_called = threading.Event()
+        reaper_thread.start()
         super(CNIDaemonServiceManager, self).run()
 
+    def _zombie_reaper(self):
+        while True:
+            try:
+                res = os.waitpid(-1, os.WNOHANG)
+                # don't sleep or stop if a zombie process was found
+                # as there could be more
+                if res != (0, 0):
+                    continue
+            except OSError as e:
+                if e.errno != errno.ECHILD:
+                    LOG.exception(
+                        "Got OS error while reaping zombie processes")
+                # There are no child processes yet (or they have been killed)
+            if self._terminate_called.isSet():
+                break
+            time.sleep(1)
+
     def terminate(self):
+        self._terminate_called.set()
         self.manager.shutdown()
 
 
