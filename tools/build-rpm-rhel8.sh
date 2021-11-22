@@ -5,7 +5,7 @@ source_path=_output/SOURCES
 mkdir -p ${source_path}
 
 # Getting version from args
-version=${1:-4.6.0}
+version=${1:-4.10.0}
 
 # Trick to make sure we'll install this RPM later on, not the one from the repo.
 release=999999999999
@@ -21,7 +21,9 @@ cp openshift-kuryr.tmpfs ${source_path}
 cp kuryr-cni.service ${source_path}
 
 # NOTE(dulek): We use this to get python3-pbr package in here.
-curl http://base-openstack-4-6.ocp.svc > /etc/yum.repos.d/base-openstack-4-6.repo
+repo_version=${version%.*}  # Cut ".0" part of the version to get 4.x.
+repo_version=${repo_version//./-}  # Replace "." with "-" to form 4-x.
+curl http://base-openstack-${repo_version}.ocp.svc > /etc/yum.repos.d/base-openstack-${repo_version}.repo
 
 yum install -y python3-pbr python3-devel
 
