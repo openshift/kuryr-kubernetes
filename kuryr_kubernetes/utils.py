@@ -616,3 +616,12 @@ def get_subnet_by_ip(nodes_subnets, target_ip):
             return nodes_subnet
 
     return None
+
+
+def is_pod_completed(pod):
+    try:
+        return (pod['status']['phase'] in
+                (constants.K8S_POD_STATUS_SUCCEEDED,
+                 constants.K8S_POD_STATUS_FAILED))
+    except KeyError:
+        return False
