@@ -182,12 +182,12 @@
         KURYR_CONFIGMAP_MODIFIABLE: true
 
 - job:
-    name: kuryr-kubernetes-tempest-crio
+    name: kuryr-kubernetes-tempest-docker
     parent: kuryr-kubernetes-octavia-base
     vars:
       devstack_localrc:
-        CONTAINER_ENGINE: crio
-    voting: false
+        CONTAINER_ENGINE: docker
+    voting: true
 
 - job:
     name: kuryr-kubernetes-tempest-amphora
