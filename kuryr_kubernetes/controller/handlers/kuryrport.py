@@ -150,6 +150,7 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
         #               won't upgrade from version creating ports for host
         #               networking pods.
         if ('deletionTimestamp' not in pod['metadata'] and
+                not utils.is_pod_completed(pod) and
                 not driver_utils.is_host_network(pod)):
             # NOTE(gryf): Ignore deleting KuryrPort, since most likely it was
             # removed manually, while we need vifs for corresponding pod
