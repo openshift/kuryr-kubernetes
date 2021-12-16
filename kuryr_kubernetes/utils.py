@@ -658,6 +658,9 @@ def get_referenced_object(obj, kind):
     function.
     """
     for ref in obj['metadata'].get('ownerReferences', []):
+        if ref['kind'] != kind:
+            continue
+
         try:
             return {'kind': kind,
                     'apiVersion': ref['apiVersion'],
