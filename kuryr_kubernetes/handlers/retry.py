@@ -83,6 +83,11 @@ class Retry(base.EventHandler):
                 }
                 self._handler(event, *args, retry_info=info, **kwargs)
                 break
+            except (exceptions.LoadBalancerNotReady,
+                    exceptions.PortNotReady):
+                with excutils.save_and_reraise_exception() as ex:
+                    if self._sleep(deadline, attempt, ex.value):
+                        ex.reraise = False
             except os_exc.ConflictException as ex:
                 if ex.details.startswith('Quota exceeded for resources'):
                     with excutils.save_and_reraise_exception() as ex:
