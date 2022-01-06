@@ -57,7 +57,7 @@ class VIFHandler(k8s_base.ResourceEventHandler):
                       "removing the vifs", pod_name)
             self.on_finalize(pod)
             return
-
+        LOG.warning("test")
         if not self._is_pod_scheduled(pod):
             # REVISIT(ivc): consider an additional configurable check that
             # would allow skipping pods to enable heterogeneous environments
