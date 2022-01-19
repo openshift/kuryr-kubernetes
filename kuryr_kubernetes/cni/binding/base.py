@@ -176,7 +176,11 @@ def disconnect(vif, instance_info, ifname, netns=None, report_health=None,
 
 @cni_utils.log_ipdb
 def cleanup(ifname, netns):
-    with get_ipdb(netns) as c_ipdb:
-        if ifname in c_ipdb.interfaces:
-            with c_ipdb.interfaces[ifname] as iface:
-                iface.remove()
+    try:
+        with get_ipdb(netns) as c_ipdb:
+            if ifname in c_ipdb.interfaces:
+                with c_ipdb.interfaces[ifname] as iface:
+                    iface.remove()
+    except Exception:
+        # Just ignore cleanup errors, there's not much we can do anyway.
+        pass
