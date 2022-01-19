@@ -649,6 +649,16 @@ def is_host_network(pod):
     return pod['spec'].get('hostNetwork', False)
 
 
+def is_pod_static(pod):
+    """Checks if Pod is static by comparing annotations."""
+    try:
+        annotations = pod['metadata']['annotations']
+        config_source = annotations[constants.K8S_ANNOTATION_CONFIG_SOURCE]
+        return config_source != 'api'
+    except KeyError:
+        return False
+
+
 def get_referenced_object(obj, kind):
     """Get referenced object.
 
