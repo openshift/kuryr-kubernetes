@@ -26,6 +26,7 @@ from kuryr_kubernetes.controller.drivers import utils as driver_utils
 from kuryr_kubernetes.controller.managers import prometheus_exporter as exp
 from kuryr_kubernetes import exceptions as k_exc
 from kuryr_kubernetes.handlers import k8s_base
+from kuryr_kubernetes import utils
 
 LOG = logging.getLogger(__name__)
 KURYRPORT_URI = constants.K8S_API_CRD_NAMESPACES + '/{ns}/kuryrports/{crd}'
@@ -149,6 +150,7 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
         #               won't upgrade from version creating ports for host
         #               networking pods.
         if ('deletionTimestamp' not in pod['metadata'] and
+                not utils.is_pod_completed(pod) and
                 not driver_utils.is_host_network(pod)):
             # NOTE(gryf): Ignore deleting KuryrPort, since most likely it was
             # removed manually, while we need vifs for corresponding pod

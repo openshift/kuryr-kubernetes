@@ -359,3 +359,15 @@ class TestUtils(test_base.TestCase):
         self.assertRaises(os_exc.ResourceNotFound, utils.get_subnet_cidr,
                           subnet_id)
         os_net.get_subnet.assert_called_once_with(subnet_id)
+
+    def test_is_pod_completed_pending(self):
+        self.assertFalse(utils.is_pod_completed({'status': {'phase':
+                         k_const.K8S_POD_STATUS_PENDING}}))
+
+    def test_is_pod_completed_succeeded(self):
+        self.assertTrue(utils.is_pod_completed({'status': {'phase':
+                        k_const.K8S_POD_STATUS_SUCCEEDED}}))
+
+    def test_is_pod_completed_failed(self):
+        self.assertTrue(utils.is_pod_completed({'status': {'phase':
+                        k_const.K8S_POD_STATUS_FAILED}}))
