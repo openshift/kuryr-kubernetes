@@ -164,6 +164,13 @@ class CNINeutronPortActivationTimeout(CNITimeout):
             f'logs of kuryr-controller to confirm.')
 
 
+class CNIAPIConnectionError(Exception):
+    def __init__(self, name, e):
+        super().__init__(
+            f'Connection error when trying to reach Kubernetes API to get '
+            f'KuryrPort {name}: {e}')
+
+
 class CNIBindingFailure(Exception):
     """Exception indicates a binding/unbinding VIF failure in CNI"""
     def __init__(self, message):

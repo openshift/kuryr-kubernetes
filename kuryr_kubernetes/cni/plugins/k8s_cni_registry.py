@@ -63,9 +63,12 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
                 cached_kp = self.registry[kp_name]['kp']
                 try:
                     kp = self.k8s.get(k_utils.get_res_link(cached_kp))
-                except Exception:
-                    LOG.exception('Error when getting KuryrPort %s', kp_name)
-                    raise exceptions.ResourceNotReady(kp_name)
+                except exceptions.K8sResourceNotFound:
+                    # This is a mismatch if we have it in the registry, but
+                    # it's missing from the API. Let's simulate it.
+                    kp = {'metadata': {'uid': None}}
+                except Exception as e:
+                    raise exceptions.CNIAPIConnectionError(kp_name, e)
 
                 if kp['metadata']['uid'] != cached_kp['metadata']['uid']:
                     LOG.warning('Stale KuryrPort %s detected in cache. (API '

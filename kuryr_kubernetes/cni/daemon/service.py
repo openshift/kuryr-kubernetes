@@ -112,6 +112,10 @@ class DaemonServer(object):
             LOG.exception('Timeout on ADD request')
             error = self._error(ErrTryAgainLater, f"{e}. Try Again Later.")
             return error, httplib.GATEWAY_TIMEOUT, self.headers
+        except exceptions.CNIAPIConnectionError as e:
+            LOG.exception('Connection error on ADD request')
+            error = self._error(ErrTryAgainLater, f"{e}. Try Again Later.")
+            return error, httplib.GATEWAY_TIMEOUT, self.headers
         except pyroute2.NetlinkError as e:
             if e.code == errno.EEXIST:
                 self._check_failure()
