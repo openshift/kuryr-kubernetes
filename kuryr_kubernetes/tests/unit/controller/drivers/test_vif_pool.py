@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import collections
-import threading
 from unittest import mock
 import uuid
 
@@ -98,7 +97,8 @@ class BaseVIFPool(test_base.TestCase):
         self.assertEqual(vif, cls.request_vif(m_driver, pod, project_id,
                                               subnets, security_groups))
 
-    def test_request_vif_empty_pool(self):
+    @mock.patch('eventlet.spawn')
+    def test_request_vif_empty_pool(self, m_eventlet):
         cls = vif_pool.BaseVIFPool
         m_driver = mock.MagicMock(spec=cls)
 
@@ -123,7 +123,7 @@ class BaseVIFPool(test_base.TestCase):
 
         self.assertRaises(exceptions.ResourceNotReady, cls.request_vif,
                           m_driver, pod, project_id, subnets, security_groups)
-        m_driver._populate_pool.assert_called_once()
+        m_eventlet.assert_called_once()
 
     def test_request_vif_pod_without_host(self):
         cls = vif_pool.BaseVIFPool
@@ -199,9 +199,9 @@ class BaseVIFPool(test_base.TestCase):
         pool_key = (mock.sentinel.host_addr, project_id)
         m_driver._recovered_pools = False
 
-        self.assertFalse(cls._populate_pool(
+        self.assertRaises(exceptions.ResourceNotReady, cls._populate_pool,
                           m_driver, pool_key, pod, subnets,
-                          tuple(security_groups)))
+                          tuple(security_groups))
         m_driver._drv_vif.request_vifs.assert_not_called()
 
     @mock.patch('kuryr_kubernetes.clients.get_kubernetes_client')
@@ -224,15 +224,12 @@ class BaseVIFPool(test_base.TestCase):
         m_driver._recovered_pools = False
 
         cls._populate_pool(m_driver, pool_key, pod, subnets,
-                           tuple(security_groups))
+                           tuple(security_groups), raise_not_ready=False)
         m_driver._drv_vif.request_vifs.assert_not_called()
 
     @mock.patch('kuryr_kubernetes.clients.get_kubernetes_client')
     @mock.patch('time.time', return_value=0)
-    @ddt.data((neutron_vif.NeutronPodVIFDriver),
-              (nested_vlan_vif.NestedVlanPodVIFDriver))
-    def test__populate_pool_no_update(self, m_vif_driver, m_time,
-                                      m_get_kubernetes_client):
+    def test__populate_pool_no_update(self, m_time, m_get_kubernetes_client):
         cls = vif_pool.BaseVIFPool
         m_driver = mock.MagicMock(spec=cls)
 
@@ -241,17 +238,41 @@ class BaseVIFPool(test_base.TestCase):
         subnets = mock.sentinel.subnets
         security_groups = 'test-sg'
         pool_key = (mock.sentinel.host_addr, project_id)
-        m_driver._get_pool_size.return_value = 4
+
+        oslo_cfg.CONF.set_override('ports_pool_update_frequency',
+                                   15,
+                                   group='vif_pool')
+        m_driver._last_update = {pool_key: {tuple(security_groups): 1}}
+        m_driver._recovered_pools = True
+
+        cls._populate_pool(m_driver, pool_key, pod, subnets,
+                           tuple(security_groups))
+        m_driver._get_pool_size.assert_not_called()
+
+    @mock.patch('kuryr_kubernetes.clients.get_kubernetes_client')
+    @mock.patch('time.time', return_value=50)
+    @ddt.data((neutron_vif.NeutronPodVIFDriver),
+              (nested_vlan_vif.NestedVlanPodVIFDriver))
+    def test__populate_pool_large_pool(self, m_vif_driver, m_time,
+                                       m_get_kubernetes_client):
+        cls = vif_pool.BaseVIFPool
+        m_driver = mock.MagicMock(spec=cls)
 
         cls_vif_driver = m_vif_driver
         vif_driver = mock.MagicMock(spec=cls_vif_driver)
         m_driver._drv_vif = vif_driver
 
+        pod = mock.sentinel.pod
+        project_id = str(uuid.uuid4())
+        subnets = mock.sentinel.subnets
+        security_groups = 'test-sg'
+        pool_key = (mock.sentinel.host_addr, project_id)
+
         oslo_cfg.CONF.set_override('ports_pool_update_frequency',
                                    15,
                                    group='vif_pool')
         oslo_cfg.CONF.set_override('ports_pool_min',
-                                   3,
+                                   5,
                                    group='vif_pool')
         m_driver._last_update = {pool_key: {tuple(security_groups): 1}}
         m_driver._get_pool_size.return_value = 10
@@ -259,7 +280,7 @@ class BaseVIFPool(test_base.TestCase):
 
         cls._populate_pool(m_driver, pool_key, pod, subnets,
                            tuple(security_groups))
-        m_driver._get_pool_size.assert_called()
+        m_driver._get_pool_size.assert_called_once()
         m_driver._drv_vif.request_vifs.assert_not_called()
 
     def test_release_vif(self):
@@ -459,22 +480,31 @@ class NeutronVIFPool(test_base.TestCase):
         subnets = mock.sentinel.subnets
         security_groups = 'test-sg'
 
-        oslo_cfg.CONF.set_override('port_debug',
-                                   True, group='kubernetes')
         pod = get_pod_obj()
-        m_get_port_name.return_value = get_pod_name(pod)
 
         m_driver._available_ports_pools = {
             pool_key: {tuple(security_groups): collections.deque([port_id])}}
         m_driver._existing_vifs = {port_id: port}
         m_get_port_name.return_value = get_pod_name(pod)
 
+        oslo_cfg.CONF.set_override('ports_pool_min',
+                                   5,
+                                   group='vif_pool')
+        oslo_cfg.CONF.set_override('port_debug',
+                                   True,
+                                   group='kubernetes')
+        oslo_cfg.CONF.set_override('port_debug',
+                                   True,
+                                   group='kubernetes')
+        pool_length = 5
+        m_driver._get_pool_size.return_value = pool_length
+
         self.assertEqual(port, cls._get_port_from_pool(
             m_driver, pool_key, pod, subnets, tuple(security_groups)))
 
         os_net.update_port.assert_called_once_with(
             port_id, name=get_pod_name(pod), device_id=pod['metadata']['uid'])
-        m_eventlet.assert_called()
+        m_eventlet.assert_not_called()
 
     @mock.patch('kuryr_kubernetes.controller.drivers.utils.get_port_name')
     @mock.patch('eventlet.spawn')
@@ -553,6 +583,8 @@ class NeutronVIFPool(test_base.TestCase):
         oslo_cfg.CONF.set_override('port_debug',
                                    False,
                                    group='kubernetes')
+        pool_length = 5
+        m_driver._get_pool_size.return_value = pool_length
 
         m_driver._available_ports_pools = {
             pool_key: {tuple(security_groups): collections.deque([]),
@@ -566,7 +598,7 @@ class NeutronVIFPool(test_base.TestCase):
 
         os_net.update_port.assert_called_once_with(
             port_id, security_groups=list(security_groups))
-        m_eventlet.assert_called()
+        m_eventlet.assert_not_called()
 
     @mock.patch('eventlet.spawn')
     def test__get_port_from_pool_empty_pool_reuse_no_update_info(self,
@@ -601,7 +633,7 @@ class NeutronVIFPool(test_base.TestCase):
 
         os_net.update_port.assert_called_once_with(
             port_id, security_groups=list(security_groups))
-        m_eventlet.assert_called()
+        m_eventlet.assert_not_called()
 
     def test__get_port_from_pool_empty_pool_reuse_no_ports(self):
         cls = vif_pool.NeutronVIFPool
@@ -899,9 +931,6 @@ class NeutronVIFPool(test_base.TestCase):
         port_id = str(uuid.uuid4())
         m_driver._available_ports_pools = {pool_key: {
             tuple(['security_group']): [port_id]}}
-        m_driver._lock = threading.Lock()
-        m_driver._populate_pool_lock = {
-            pool_key: mock.MagicMock(spec=threading.Lock())}
         m_driver._existing_vifs = {port_id: mock.sentinel.vif}
         m_driver._recovered_pools = True
 
@@ -939,9 +968,6 @@ class NeutronVIFPool(test_base.TestCase):
         port_id = str(uuid.uuid4())
         m_driver._available_ports_pools = {pool_key: {
             tuple(['security_group']): [port_id]}}
-        m_driver._lock = threading.Lock()
-        m_driver._populate_pool_lock = {
-            pool_key: mock.MagicMock(spec=threading.Lock())}
         m_driver._existing_vifs = {}
         m_driver._recovered_pools = True
 
@@ -1027,7 +1053,7 @@ class NestedVIFPool(test_base.TestCase):
 
         os_net.update_port.assert_called_once_with(
             port_id, name=get_pod_name(pod))
-        m_eventlet.assert_called()
+        m_eventlet.assert_not_called()
 
     @mock.patch('kuryr_kubernetes.controller.drivers.utils.get_port_name')
     @mock.patch('eventlet.spawn')
@@ -1121,7 +1147,7 @@ class NestedVIFPool(test_base.TestCase):
 
         os_net.update_port.assert_called_once_with(
             port_id, security_groups=list(security_groups))
-        m_eventlet.assert_called()
+        m_eventlet.assert_not_called()
 
     @mock.patch('eventlet.spawn')
     def test__get_port_from_pool_empty_pool_reuse_no_update_info(self,
@@ -1156,7 +1182,7 @@ class NestedVIFPool(test_base.TestCase):
 
         os_net.update_port.assert_called_once_with(
             port_id, security_groups=list(security_groups))
-        m_eventlet.assert_called()
+        m_eventlet.assert_not_called()
 
     def test__get_port_from_pool_empty_pool_reuse_no_ports(self):
         cls = vif_pool.NestedVIFPool
@@ -1810,9 +1836,6 @@ class NestedVIFPool(test_base.TestCase):
         vif.vlan_id = vlan_id
         m_driver._available_ports_pools = {pool_key: {
             tuple(['security_group']): [port_id]}}
-        m_driver._lock = threading.Lock()
-        m_driver._populate_pool_lock = {
-            pool_key: mock.MagicMock(spec=threading.Lock())}
         m_driver._existing_vifs = {port_id: vif}
         m_driver._recovered_pools = True
 
@@ -1902,9 +1925,6 @@ class NestedVIFPool(test_base.TestCase):
         vif.vlan_id = vlan_id
         m_driver._available_ports_pools = {pool_key: {
             tuple(['security_group']): [port_id]}}
-        m_driver._lock = threading.Lock()
-        m_driver._populate_pool_lock = {
-            pool_key: mock.MagicMock(spec=threading.Lock())}
         m_driver._existing_vifs = {}
         m_driver._recovered_pools = True
 
