@@ -9,7 +9,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-import eventlet
+
 import munch
 from unittest import mock
 
@@ -106,11 +106,9 @@ class TestNestedVlanPodVIFDriver(test_base.TestCase):
                                                        subports_info)
         os_net.create_ports.return_value = (p for p in [port, port])
         m_to_vif.return_value = vif
-        semaphore = mock.MagicMock(spec=eventlet.semaphore.Semaphore(20))
 
         self.assertEqual([vif, vif], cls.request_vifs(
-            m_driver, pod, project_id, subnets, security_groups, num_ports,
-            semaphore))
+            m_driver, pod, project_id, subnets, security_groups, num_ports))
 
         m_driver._get_parent_port.assert_called_once_with(pod)
         m_driver._get_trunk_id.assert_called_once_with(parent_port)
@@ -147,11 +145,10 @@ class TestNestedVlanPodVIFDriver(test_base.TestCase):
         m_driver._get_trunk_id.return_value = trunk_id
         m_driver._create_subports_info.return_value = (port_request,
                                                        subports_info)
-        semaphore = mock.MagicMock(spec=eventlet.semaphore.Semaphore(20))
 
         self.assertEqual([], cls.request_vifs(m_driver, pod, project_id,
                                               subnets, security_groups,
-                                              num_ports, semaphore))
+                                              num_ports))
 
         m_driver._get_parent_port.assert_called_once_with(pod)
         m_driver._get_trunk_id.assert_called_once_with(parent_port)
@@ -188,12 +185,10 @@ class TestNestedVlanPodVIFDriver(test_base.TestCase):
         m_driver._create_subports_info.return_value = (port_request,
                                                        subports_info)
         os_net.create_ports.side_effect = os_exc.SDKException
-        semaphore = mock.MagicMock(spec=eventlet.semaphore.Semaphore(20))
 
         self.assertRaises(
             os_exc.SDKException, cls.request_vifs,
-            m_driver, pod, project_id, subnets, security_groups, num_ports,
-            semaphore)
+            m_driver, pod, project_id, subnets, security_groups, num_ports)
 
         m_driver._get_parent_port.assert_called_once_with(pod)
         m_driver._get_trunk_id.assert_called_once_with(parent_port)
@@ -233,10 +228,9 @@ class TestNestedVlanPodVIFDriver(test_base.TestCase):
                                                        subports_info)
         os_net.create_ports.return_value = (p for p in [port, port])
         os_net.add_trunk_subports.side_effect = os_exc.ConflictException
-        semaphore = mock.MagicMock(spec=eventlet.semaphore.Semaphore(20))
 
         self.assertEqual([], cls.request_vifs(m_driver, pod, project_id,
-                         subnets, security_groups, num_ports, semaphore))
+                         subnets, security_groups, num_ports))
 
         m_driver._get_parent_port.assert_called_once_with(pod)
         m_driver._get_trunk_id.assert_called_once_with(parent_port)
@@ -279,10 +273,9 @@ class TestNestedVlanPodVIFDriver(test_base.TestCase):
                                                        subports_info)
         os_net.create_ports.return_value = (p for p in [port, port])
         os_net.add_trunk_subports.side_effect = os_exc.SDKException
-        semaphore = mock.MagicMock(spec=eventlet.semaphore.Semaphore(20))
 
         self.assertEqual([], cls.request_vifs(m_driver, pod, project_id,
-                         subnets, security_groups, num_ports, semaphore))
+                         subnets, security_groups, num_ports))
 
         m_driver._get_parent_port.assert_called_once_with(pod)
         m_driver._get_trunk_id.assert_called_once_with(parent_port)

@@ -107,7 +107,6 @@ VIF_TYPE_TO_DRIVER_MAPPING = {
 
 NODE_PORTS_CLEAN_FREQUENCY = 600  # seconds
 POPULATE_POOL_TIMEOUT = 420  # seconds
-BULK_PORTS_CREATION_REQUESTS = 20
 
 
 class NoopVIFPool(base.VIFPoolDriver):
@@ -163,8 +162,6 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
     when populating pools.
     - ports_pool_update_frequency: interval in seconds between ports pool
     updates for recycling ports.
-    Also, it has a Semaphore _create_ports_semaphore to restrict the number of
-    bulk Ports creation calls running in parallel.
     """
 
     def __init__(self):
@@ -260,8 +257,7 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
                             project_id=pool_key[1],
                             subnets=subnets,
                             security_groups=security_groups,
-                            num_ports=num_ports,
-                            semaphore=self._create_ports_semaphore)
+                            num_ports=num_ports)
                     except os_exc.SDKException as exc:
                         kubernetes.add_event(
                             pod, 'FailToPopulateVIFPool',
@@ -384,8 +380,6 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
         self._last_update = collections.defaultdict()
         self._lock = threading.Lock()
         self._populate_pool_lock = collections.defaultdict(threading.Lock)
-        semaphore = eventlet.semaphore.Semaphore(BULK_PORTS_CREATION_REQUESTS)
-        self._create_ports_semaphore = semaphore
 
     def _get_trunks_info(self):
         """Returns information about trunks and their subports.
@@ -1148,8 +1142,7 @@ class NestedVIFPool(BaseVIFPool):
             subnets=subnets,
             security_groups=security_groups,
             num_ports=num_ports,
-            trunk_ip=trunk_ip,
-            semaphore=self._create_ports_semaphore)
+            trunk_ip=trunk_ip)
 
         pool_key = self._get_pool_key(trunk_ip, project_id, None, subnets)
         for vif in vifs:
