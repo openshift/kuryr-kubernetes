@@ -179,7 +179,7 @@
         KURYR_USE_PORT_POOLS: true
         KURYR_POD_VIF_DRIVER: neutron-vif
         KURYR_VIF_POOL_DRIVER: neutron
-        KURYR_CONFIGMAP_MODIFIABLE: true
+        KURYR_CONFIGMAP_MODIFIABLE: false
 
 - job:
     name: kuryr-kubernetes-tempest-docker
@@ -192,6 +192,7 @@
 - job:
     name: kuryr-kubernetes-tempest-amphora
     parent: kuryr-kubernetes-base-ovn
+    nodeset: kuryr-nested-virt-ubuntu-focal
     required-projects:
       - openstack/octavia
       - openstack/python-octaviaclient
@@ -231,6 +232,7 @@
 - job:
     name: kuryr-kubernetes-tempest-amphora-ovs
     parent: kuryr-kubernetes-octavia-base-ovs
+    nodeset: kuryr-nested-virt-ubuntu-focal
     vars:
       devstack_localrc:
         KURYR_EP_DRIVER_OCTAVIA_PROVIDER: amphora
