@@ -178,7 +178,6 @@ exit 0
 %{_bindir}/kuryr-k8s-controller
 %{_bindir}/kuryr-k8s-sanity
 %{_bindir}/kuryr-k8s-status
-%{_bindir}/kuryr-dns-webhook
 %{_bindir}/kuryr-gather-openstack-data
 %{_unitdir}/kuryr-controller.service
 
