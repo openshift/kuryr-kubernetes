@@ -6,9 +6,10 @@ ENV container=oci
 #               using sed to enable it. Ignoring fail as it won't work (nor
 #               it's necessary) in OCP builds.
 RUN (sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/built.repo || true) \
- && dnf install -y openshift-kuryr-controller \
  && dnf clean all \
- && rm -rf /var/cache/yum
+ && rm -rf /var/cache/dnf \
+ && dnf update -y \
+ && dnf install -y openshift-kuryr-controller
 
 USER kuryr
 CMD ["--config-dir", "/etc/kuryr"]
