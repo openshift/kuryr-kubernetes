@@ -1,11 +1,11 @@
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.17-openshift-4.11 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.12 AS builder
 
 WORKDIR /go/src/github.com/openshift/kuryr-kubernetes
 COPY . .
 WORKDIR /go/src/github.com/openshift/kuryr-kubernetes/kuryr_cni
 RUN go build -o /go/bin/kuryr-cni ./pkg
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.11
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.12
 
 ENV container=oci
 ARG OSLO_LOCK_PATH=/var/kuryr-lock
