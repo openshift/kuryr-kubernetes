@@ -97,7 +97,7 @@ class KuryrNetworkHandler(k8s_base.ResourceEventHandler):
             except os_exc.SDKException as ex:
                 self.k8s.add_event(kuryrnet_crd, 'AddingSubnetToRouterFailed',
                                    f'Error adding Neutron subnet {subnet_id} '
-                                   f'to router {router_id}: {ex.details}',
+                                   f'to router: {ex.details}',
                                    'Warning')
                 raise
             status = {'routerId': router_id, 'populated': False}
@@ -179,12 +179,12 @@ class KuryrNetworkHandler(k8s_base.ResourceEventHandler):
             services = driver_utils.get_services()
             self._update_services(services, crd_selectors, project_id)
 
-        LOG.debug('Removing finalizer for KuryrNet CRD %s', kuryrnet_crd)
+        LOG.debug('Removing finalizer for KuryrNetwork CRD %s', kuryrnet_crd)
         try:
             self.k8s.remove_finalizer(kuryrnet_crd,
                                       constants.KURYRNETWORK_FINALIZER)
         except k_exc.K8sClientException:
-            LOG.exception('Error removing kuryrnetwork CRD finalizer for %s',
+            LOG.exception('Error removing KuryrNetwork CRD finalizer for %s',
                           kuryrnet_crd)
             raise
 

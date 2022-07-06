@@ -414,9 +414,7 @@ rules:
     - openstack.org
   verbs: ["*"]
   resources:
-    - kuryrnets
     - kuryrnetworks
-    - kuryrnetpolicies
     - kuryrnetworkpolicies
     - kuryrloadbalancers
     - kuryrports
