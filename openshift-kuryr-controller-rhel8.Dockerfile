@@ -1,18 +1,29 @@
 FROM registry.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.12
 
-ENV container=oci
+RUN dnf install -y --setopt=tsflags=nodocs python3-pip \
+ && dnf install -y --setopt=tsflags=nodocs python3-devel git gcc gcc-c++ libffi-devel
 
-# FIXME(dulek): For some reason the local repo in OKD builds is disabled,
-#               using sed to enable it. Ignoring fail as it won't work (nor
-#               it's necessary) in OCP builds.
-RUN (sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/built.repo || true) \
- && dnf install -y openshift-kuryr-controller \
+COPY . /opt/kuryr-kubernetes
+# Cachito stuff
+COPY $REMOTE_SOURCES $REMOTE_SOURCES_DIR
+
+ARG VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+# This is enough to activate a venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+RUN source $REMOTE_SOURCES_DIR/cachito-gomod-with-deps/cachito.env \
+ # Needed to have rust wheel
+ && pip3 --no-cache-dir install --upgrade setuptools pip \
+ && pip3 --no-cache-dir install wheel \
+ && pip3 --no-cache-dir install -r /opt/kuryr-kubernetes/kuryr-requirements.txt /opt/kuryr-kubernetes \
+ && dnf -y history undo last \
  && dnf clean all \
- && rm -rf /var/cache/yum
+ && rm -rf /opt/kuryr-kubernetes \
+ && rm -rf $REMOTE_SOURCES_DIR
 
-USER kuryr
-CMD ["--config-dir", "/etc/kuryr"]
-ENTRYPOINT [ "/usr/bin/kuryr-k8s-controller" ]
+CMD [ "--config-dir", "/etc/kuryr" ]
+ENTRYPOINT [ "kuryr-k8s-controller" ]
 
 LABEL \
         io.k8s.description="This is a component of OpenShift Container Platform and provides a kuryr-controller service." \
