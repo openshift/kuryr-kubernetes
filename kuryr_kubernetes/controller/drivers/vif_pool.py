@@ -1075,16 +1075,28 @@ class NestedVIFPool(BaseVIFPool):
         if not self._recovered_pools:
             LOG.debug("Kuryr-controller not yet ready to populate pools.")
             raise exceptions.ResourceNotReady(trunk_ip)
+
         pool_key = self._get_pool_key(trunk_ip, project_id, None, subnets)
-        pools = self._available_ports_pools.get(pool_key)
-        if not pools:
-            # NOTE(ltomasbo): If the amount of nodes is large the repopulation
-            # actions may take too long. Using half of the batch to prevent
-            # the problem
-            num_ports = int(max(oslo_cfg.CONF.vif_pool.ports_pool_batch/2,
-                            oslo_cfg.CONF.vif_pool.ports_pool_min))
-            self.force_populate_pool(trunk_ip, project_id, subnets,
-                                     security_groups, num_ports)
+        lock = self._get_populate_pool_lock(pool_key)
+
+        if lock.acquire(timeout=POPULATE_POOL_TIMEOUT):
+            try:
+                pools = self._available_ports_pools.get(pool_key)
+                if not pools:
+                    # NOTE(ltomasbo): If the amount of nodes is large the
+                    # repopulation actions may take too long. Using half of the
+                    # batch to prevent the problem
+                    num_ports = int(max(oslo_cfg.CONF.vif_pool
+                                        .ports_pool_batch/2,
+                                        oslo_cfg.CONF.vif_pool.ports_pool_min))
+                    self.force_populate_pool(trunk_ip, project_id, subnets,
+                                             security_groups, num_ports)
+            finally:
+                lock.release()
+        else:
+            LOG.debug("Kuryr-controller timed out waiting for it turn to "
+                      "populate pool, retrying.")
+            raise exceptions.ResourceNotReady(trunk_ip)
 
     def force_populate_pool(self, trunk_ip, project_id, subnets,
                             security_groups, num_ports=None):
@@ -1142,10 +1154,14 @@ class NestedVIFPool(BaseVIFPool):
                         for p_id in sg_ports]
             try:
                 self._drv_vif._remove_subports(trunk_id, ports_id)
+            except os_exc.NotFoundException:
+                # We don't know which subport was already removed, but we'll
+                # attempt a manual detach on DELETE error, so just continue.
+                pass
             except (os_exc.SDKException, os_exc.HttpException):
                 LOG.exception('Error removing subports from trunk: %s',
                               trunk_id)
-                continue
+                raise exceptions.ResourceNotReady(net_id)
 
             for port_id in ports_id:
                 try:
@@ -1163,11 +1179,14 @@ class NestedVIFPool(BaseVIFPool):
                 except KeyError:
                     pass
 
+        # Parallelize Ports deletion. At this point the Ports
+        # should have been detatched from Trunk and if not operation
+        # will be retried
         for result in epool.imap(c_utils.delete_neutron_port, ports_to_remove):
             if result:
                 LOG.error('During Neutron port deletion an error occured: %s',
                           result)
-                raise result
+                raise exceptions.ResourceNotReady(net_id)
 
 
 class MultiVIFPool(base.VIFPoolDriver):
