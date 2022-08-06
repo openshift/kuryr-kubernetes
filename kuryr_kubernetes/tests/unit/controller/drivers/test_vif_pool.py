@@ -1805,7 +1805,8 @@ class NestedVIFPool(test_base.TestCase):
         m_driver._get_pool_key_net.return_value = net_id
         m_driver._drv_vif._remove_subports.side_effect = os_exc.SDKException
 
-        cls.delete_network_pools(m_driver, net_id)
+        self.assertRaises(exceptions.ResourceNotReady,
+                          cls.delete_network_pools, m_driver, net_id)
 
         m_driver._trigger_return_to_pool.assert_called_once()
         m_driver._get_pool_key_net.assert_called_once()
