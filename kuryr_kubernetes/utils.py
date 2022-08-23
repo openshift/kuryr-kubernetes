@@ -690,3 +690,26 @@ def get_referenced_object(obj, kind):
     except exceptions.K8sClientException:
         LOG.debug('Error when fetching %s to add an event %s, ignoring',
                   kind, get_res_unique_name(obj))
+
+
+def get_parent_port_id(vif_obj):
+    os_net = clients.get_network_client()
+    tags = []
+
+    if CONF.neutron_defaults.resource_tags:
+        tags = CONF.neutron_defaults.resource_tags
+
+    trunks = os_net.trunks(tags=tags)
+
+    for trunk in trunks:
+        for sp in trunk.sub_ports:
+            if sp['port_id'] == vif_obj.id:
+                return trunk.port_id
+
+    return None
+
+
+def get_parent_port_ip(port_id):
+    os_net = clients.get_network_client()
+    parent_port = os_net.get_port(port_id)
+    return parent_port.fixed_ips[0]['ip_address']
