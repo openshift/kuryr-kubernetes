@@ -81,7 +81,7 @@
       devstack_services:
         q-trunk: true
         o-da: false
-    voting: true
+    voting: false
 
 - job:
     name: kuryr-kubernetes-tempest-ipv6
@@ -183,7 +183,7 @@
     vars:
       devstack_localrc:
         CONTAINER_ENGINE: docker
-        KURYR_KUBERNETES_VERSION: 1.23.13
+        KURYR_KUBERNETES_VERSION: 1.23.16
     voting: true
 
 - job:
@@ -226,7 +226,7 @@
         o-cw: true
         o-hk: true
         o-hm: true
-    voting: true
+    voting: false
 
 - job:
     name: kuryr-kubernetes-tempest-amphora-ovs
