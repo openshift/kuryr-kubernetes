@@ -31,15 +31,6 @@ LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
 RETRY_DELAY = 1000  # 1 second in milliseconds
 
-# TODO(dulek, gryf): Another corner case is (and was) when pod is deleted
-# before it's corresponding CRD was created and populated by vifs by
-# controller or even noticed by any watcher. Kubelet will try to delete such
-# vif, but we will have no data about it. This is currently worked around by
-# returning successfully in case of timing out in delete. To solve this
-# properly we need to watch for pod deletes as well, or perhaps create
-# finalizer for the pod as soon, as we know, that kuryrport CRD will be
-# created.
-
 
 class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
     def __init__(self, registry, healthy):
@@ -48,31 +39,35 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
         self.k8s = clients.get_kubernetes_client()
 
     def _get_obj_name(self, params):
-        return "%(namespace)s/%(name)s" % {
-            'namespace': params.args.K8S_POD_NAMESPACE,
-            'name': params.args.K8S_POD_NAME}
+        return f'{params.args.K8S_POD_NAMESPACE}/{params.args.K8S_POD_NAME}'
+
+    def _get_pod(self, params):
+        namespace = params.args.K8S_POD_NAMESPACE
+        name = params.args.K8S_POD_NAME
+
+        try:
+            return self.k8s.get(
+                f'{k_const.K8S_API_NAMESPACES}/{namespace}/pods/{name}')
+        except exceptions.K8sResourceNotFound:
+            return None
+        except exceptions.K8sClientException:
+            uniq_name = self._get_obj_name(params)
+            LOG.exception('Error when getting Pod %s', uniq_name)
+            raise
 
     def add(self, params):
         kp_name = self._get_obj_name(params)
         timeout = CONF.cni_daemon.vif_annotation_timeout
 
-        # Try to confirm if CRD in the registry is not stale cache. If it is,
-        # remove it.
-        with lockutils.lock(kp_name, external=True):
-            if kp_name in self.registry:
-                cached_kp = self.registry[kp_name]['kp']
-                try:
-                    kp = self.k8s.get(k_utils.get_res_link(cached_kp))
-                except Exception:
-                    LOG.exception('Error when getting KuryrPort %s', kp_name)
-                    raise exceptions.ResourceNotReady(kp_name)
-
-                if kp['metadata']['uid'] != cached_kp['metadata']['uid']:
-                    LOG.warning('Stale KuryrPort %s detected in cache. (API '
-                                'uid=%s, cached uid=%s). Removing it from '
-                                'cache.', kp_name, kp['metadata']['uid'],
-                                cached_kp['metadata']['uid'])
-                    del self.registry[kp_name]
+        # In order to fight race conditions when pods get recreated with the
+        # same name (think StatefulSet), we're trying to get pod UID either
+        # from the request or the API in order to use it as the ID to compare.
+        if 'K8S_POD_UID' not in params.args:
+            # CRI doesn't pass K8S_POD_UID, get it from the API.
+            pod = self._get_pod(params)
+            if not pod:
+                raise exceptions.CNIPodGone(kp_name)
+            params.args.K8S_POD_UID = pod['metadata']['uid']
 
         vifs = self._do_work(params, b_base.connect, timeout)
 
@@ -116,6 +111,14 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
     def delete(self, params):
         kp_name = self._get_obj_name(params)
         try:
+            with lockutils.lock(kp_name, external=True):
+                kp = self.registry[kp_name]
+                if kp == k_const.CNI_DELETED_POD_SENTINEL:
+                    LOG.warning(
+                        'Received DEL request for deleted Pod %s without a'
+                        'KuryrPort. Ignoring.', kp_name)
+                    del self.registry[kp_name]
+                    return
             reg_ci = self.registry[kp_name]['containerid']
             LOG.debug('Read containerid = %s for KuryrPort %s', reg_ci,
                       kp_name)
@@ -137,7 +140,7 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
         # delay before registry is populated by watcher.
         try:
             self._do_work(params, b_base.disconnect, 5)
-        except exceptions.CNIKuryrPortTimeout:
+        except (exceptions.CNIKuryrPortTimeout, exceptions.CNIPodUidMismatch):
             # So the VIF info seems to be lost at this point, we don't even
             # know what binding driver was used to plug it. Let's at least
             # try to remove the interface we created from the netns to prevent
@@ -169,19 +172,46 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
                 LOG.debug("Reporting CNI driver not healthy.")
                 self.healthy.value = driver_healthy
 
-    def _do_work(self, params, fn, timeout):
+    def _get_vifs_from_registry(self, params, timeout):
         kp_name = self._get_obj_name(params)
 
         # In case of KeyError retry for `timeout` s, wait 1 s between tries.
         @retrying.retry(stop_max_delay=timeout * 1000, wait_fixed=RETRY_DELAY,
-                        retry_on_exception=lambda e: isinstance(e, KeyError))
+                        retry_on_exception=lambda e: isinstance(
+                            e, (KeyError, exceptions.CNIPodUidMismatch)))
         def find():
-            return self.registry[kp_name]
+            d = self.registry[kp_name]
+            if d == k_const.CNI_DELETED_POD_SENTINEL:
+                # Pod got deleted meanwhile
+                raise exceptions.CNIPodGone(kp_name)
+
+            static = d['kp']['spec'].get('podStatic', None)
+            uid = d['kp']['spec']['podUid']
+            # FIXME(dulek): This is weirdly structured for upgrades support.
+            #               If podStatic is not set (KuryrPort created by old
+            #               Kuryr version), then on uid mismatch we're fetching
+            #               pod from API and check if it's static here. Pods
+            #               are quite ephemeral, so will gradually get replaced
+            #               after the upgrade and in a while all should have
+            #               the field set and the performance penalty should
+            #               be resolved. Remove in the future.
+            if 'K8S_POD_UID' in params.args and uid != params.args.K8S_POD_UID:
+                if static is None:
+                    pod = self._get_pod(params)
+                    static = k_utils.is_pod_static(pod)
+
+                # Static pods have mirror pod UID in API, so it's always
+                # mismatched. We don't raise in that case. See [1] for more.
+                # [1] https://github.com/k8snetworkplumbingwg/multus-cni/
+                #     issues/773
+                if not static:
+                    raise exceptions.CNIPodUidMismatch(
+                        kp_name, params.args.K8S_POD_UID, uid)
+            return d
 
         try:
             d = find()
-            kp = d['kp']
-            vifs = d['vifs']
+            return d['kp'], d['vifs']
         except KeyError:
             data = {'metadata': {'name': params.args.K8S_POD_NAME,
                                  'namespace': params.args.K8S_POD_NAMESPACE}}
@@ -191,6 +221,9 @@ class K8sCNIRegistryPlugin(base_cni.CNIPlugin):
                                f'created for {kp_name}. Check '
                                f'kuryr-controller logs.', 'Warning')
             raise exceptions.CNIKuryrPortTimeout(kp_name)
+
+    def _do_work(self, params, fn, timeout):
+        kp, vifs = self._get_vifs_from_registry(params, timeout)
 
         for ifname, vif in vifs.items():
             is_default_gateway = (ifname == k_const.DEFAULT_IFNAME)
