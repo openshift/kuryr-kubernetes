@@ -124,12 +124,9 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
                                        f' active VIFs')
                 except k_exc.K8sResourceNotFound as ex:
                     LOG.exception("Failed to update KuryrPort CRD: %s", ex)
-                    security_groups = self._drv_sg.get_security_groups(
-                        pod, project_id)
                     for ifname, data in vifs.items():
                         self._drv_vif_pool.release_vif(pod, data['vif'],
-                                                       project_id,
-                                                       security_groups)
+                                                       project_id)
                     self.k8s.add_event(pod, 'UpdateKuryrPortCRDFailed',
                                        f'Marking ports as ACTIVE in the '
                                        f'KuryrPort failed: {ex}', 'Warning')
@@ -336,9 +333,7 @@ class KuryrPortHandler(k8s_base.ResourceEventHandler):
             LOG.exception("Kubernetes Client Exception creating "
                           "KuryrPort CRD: %s", ex)
             for ifname, data in vifs.items():
-                self._drv_vif_pool.release_vif(pod, data['vif'],
-                                               project_id,
-                                               security_groups)
+                self._drv_vif_pool.release_vif(pod, data['vif'], project_id)
             self.k8s.add_event(pod, 'ExceptionOnKPUpdate', f'There was k8s '
                                f'client exception on updating corresponding '
                                f'KuryrPort CRD: {ex}', 'Warning')
