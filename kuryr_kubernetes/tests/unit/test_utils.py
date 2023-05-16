@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from unittest import mock
+import uuid
 
 import munch
 from openstack import exceptions as os_exc
@@ -22,6 +23,7 @@ from kuryr_kubernetes import constants as k_const
 from kuryr_kubernetes import exceptions as k_exc
 from kuryr_kubernetes.objects import vif
 from kuryr_kubernetes.tests import base as test_base
+from kuryr_kubernetes.tests import fake
 from kuryr_kubernetes.tests.unit import kuryr_fixtures as k_fix
 from kuryr_kubernetes import utils
 
@@ -500,3 +502,14 @@ class TestUtils(test_base.TestCase):
     def test_is_pod_completed_failed(self):
         self.assertTrue(utils.is_pod_completed({'status': {'phase':
                         k_const.K8S_POD_STATUS_FAILED}}))
+
+    def test__get_parent_port_ip(self):
+        os_net = self.useFixture(k_fix.MockNetworkClient()).client
+
+        port_id = str(uuid.uuid4())
+        ip_address = mock.sentinel.ip_address
+
+        port_obj = fake.get_port_obj(ip_address=ip_address)
+        os_net.get_port.return_value = port_obj
+
+        self.assertEqual(ip_address, utils.get_parent_port_ip(port_id))
