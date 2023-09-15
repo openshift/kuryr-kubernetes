@@ -480,8 +480,14 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
                     # needs to call neutron to get network and subnet
                     # information. This ensures it is only called once
                     # per subnet in use
+                    if not port.fixed_ips:
+                        LOG.warning(
+                            "Port %s doesn't have IPs. This is unexpected and "
+                            "a sign of a possible Neutron issue", port.id)
+                        continue
+
                     subnet_id = port.fixed_ips[0]['subnet_id']
-                    if not subnets.get(subnet_id):
+                    if subnet_id not in subnets:
                         # NOTE(maysams): Avoid calling Neutron by
                         # getting the Network and Subnet info from
                         # Network defined on an existing KuryrPort CR.
