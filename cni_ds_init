@@ -6,7 +6,7 @@ function cleanup() {
 }
 
 function deploy() {
-    # Copy the binary into the designated location
+    # Copy the binary into the designated location, abc
     cp /kuryr-cni "/opt/cni/bin/kuryr-cni"
     chmod +x /opt/cni/bin/kuryr-cni
     cp /etc/kuryr-cni/10-kuryr.conflist /etc/cni/net.d/10-kuryr.conflist

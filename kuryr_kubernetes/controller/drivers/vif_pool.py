@@ -458,10 +458,14 @@ class BaseVIFPool(base.VIFPoolDriver, metaclass=abc.ABCMeta):
         if tags:
             attrs['tags'] = tags
 
-        all_active_ports = os_net.ports(**attrs)
+        LOG.warning('Making a Neutron list ports call with %s', attrs)
+        all_active_ports = list(os_net.ports(**attrs))
+        LOG.warning('Result: %s', all_active_ports)
+
         in_use_ports, in_use_networks = self._get_in_use_ports_info()
 
         for port in all_active_ports:
+            LOG.warning('Processed port: %s', port)
             # Parent port
             # NOTE(dulek): We do not filter by worker_nodes_subnets here
             #              meaning that we might include some unrelated trunks,
@@ -994,6 +998,8 @@ class NestedVIFPool(BaseVIFPool):
                            for subport_id in p_port['subports']]
         port_ids_to_delete = [p_id for p_id in available_subports
                               if p_id not in trunks_subports]
+        LOG.warning('trunks_subports: %s', trunks_subports)
+        LOG.warning('port_ids_to_delete: %s', port_ids_to_delete)
         for port_id in port_ids_to_delete:
             LOG.debug("Deleting port with wrong status: %s", port_id)
             try:
