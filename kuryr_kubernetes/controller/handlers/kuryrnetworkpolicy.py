@@ -168,11 +168,17 @@ class KuryrNetworkPolicyHandler(k8s_base.ResourceEventHandler):
         matched_pods = self._drv_policy.affected_pods(knp)
         pods_to_update.extend(matched_pods)
 
+        updated_pods = []
         for pod in pods_to_update:
             if (driver_utils.is_host_network(pod) or
                     not driver_utils.is_pod_scheduled(pod)):
                 continue
             pod_sgs = self._drv_pod_sg.get_security_groups(pod, project_id)
+            if pod['metadata']['uid'] in updated_pods:
+                # Pod already updated no need to update again
+                continue
+            else:
+                updated_pods.append(pod['metadata']['uid'])
             try:
                 self._drv_vif_pool.update_vif_sgs(pod, pod_sgs)
             except os_exc.NotFoundException:
