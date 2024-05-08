@@ -174,12 +174,14 @@ class KuryrNetworkPolicyHandler(k8s_base.ResourceEventHandler):
                     not driver_utils.is_pod_scheduled(pod)):
                 continue
             pod_sgs = self._drv_pod_sg.get_security_groups(pod, project_id)
+            LOG.info(pod['metadata']['uid'])
             if pod['metadata']['uid'] in updated_pods:
                 # Pod already updated no need to update again
                 continue
             else:
                 updated_pods.append(pod['metadata']['uid'])
             try:
+                LOG.info("Updating VIF SG!!!")
                 self._drv_vif_pool.update_vif_sgs(pod, pod_sgs)
             except os_exc.NotFoundException:
                 # Pod got deleted in the meanwhile, should be safe to ignore.
