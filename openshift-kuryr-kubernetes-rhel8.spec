@@ -202,3 +202,5 @@ exit 0
 %dir %attr(0755, root, root) %{_libexecdir}/%{project}
 %{_libexecdir}/%{project}/cni_ds_init
 %config(noreplace) %attr(0640, root, %{project}) %{_sysconfdir}/%{project}-cni/10-kuryr.conflist
+
+%changelog
