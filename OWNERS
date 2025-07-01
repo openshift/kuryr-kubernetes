@@ -1,7 +1,9 @@
 approvers:
-- luis5tb
-- MaysaMacedo
+- dkokkino
 - gryf
+- mandre
+- pierreprinetti
+- stephenfin
 
 component: "Networking"
 subcomponent: "kuryr"
